@@ -1,8 +1,14 @@
-library(MASS)
 library(tidyverse)
+library(MASS)
 library(Matrix)
 library(mvtnorm)
 library(optimr)
+library(fda)
+library(plotly)
+library(gganimate)
+library(transformr)
+library(gifski)
+library(png)
 
 source('Computing_functions.R')
 
@@ -18,7 +24,7 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
   ####
   ## return : list of trained HP, boolean to indicate convergence
   #browser()
-  n_loop_max = 25
+  n_loop_max = 15
   list_ID = unique(db$ID)
   ID_k = names(prior_mean_k)
   hp = list('theta_k' = ini_hp$theta_k %>% list() %>% rep(length(ID_k))  %>% setNames(nm = ID_k), 
@@ -35,11 +41,11 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
     print(i)
     ## E-Step
     param = e_step_VEM(db, prior_mean_k, kern_0, kern_i, hp, tau_i_k)  
-
+    
     ## Monitoring of the LL
-    new_logLL_monitoring = logL_monitoring_VEM(hp, db, kern_i, kern_0, mu_k_param = param , m_k = prior_mean_k)
-                            #0.5 * (length(param$cov) * nrow(param$cov[[1]]) +
-                               #   Reduce('+', lapply(param$cov, function(x) log(det(x)))) )) %>% print()
+    new_logLL_monitoring = logL_monitoring_VEM(hp, db, kern_i, kern_0, mu_k_param = param , m_k = prior_mean_k) 
+    #0.5 * (length(param$cov) * nrow(param$cov[[1]]) +
+    #Reduce('+', lapply(param$cov, function(x) log(det(x)))) )
     print(new_logLL_monitoring)
     diff_moni = new_logLL_monitoring - logLL_monitoring
     
@@ -58,10 +64,10 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
     ## Testing the stoping condition
     logL_new = logL_monitoring_VEM(new_hp, db, kern_i, kern_0, mu_k_param = param, m_k = prior_mean_k)
     eps = (logL_new - logL_monitoring_VEM(hp, db, kern_i, kern_0, mu_k_param = param, m_k = prior_mean_k)) / 
-          abs(logL_new)
+      abs(logL_new)
     
     print(c('eps', eps))
-    if(eps < 1e-3)
+    if(eps < 1e-1)
     {
       if(eps > 0){hp = new_hp}
       cv = TRUE
@@ -74,57 +80,93 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
   t2 = Sys.time()
   list('hp' = new_hp, 'convergence' = cv,  'param' = param,
        'Time_train' =  difftime(t2, t1, units = "secs")) %>% 
-  return()
+    return()
 }
 
-### Sûrement besoin d'un EM pour le nouvel individu
+model_selection = function(db, k_grid = 1:5, ini_hp = list('theta_k' = c(1, 1, 0.2), 'theta_i' = c(1, 1, 0.2)),
+                           kern_0 = kernel_mu, kern_i = kernel, ini_tau_i_k = NULL, common_hp_k = T, common_hp_i = T, 
+                           plot = T)
+{
+  floop = function(K)
+  {
+    print(paste0('K = ', K))
+    prior_mean_k = rep(0, K) %>% setNames(paste0('K', seq_len(K))) %>% as.list
+    
+    if(K == 1)
+    {
+      model = training(db, 0, list('theta_0'=ini_hp$theta_k[1:2], 'theta_i'=ini_hp$theta_i), kern_0, kern_i, common_hp_i)
+    }
+    else
+    {
+      model = training_VEM(db, prior_mean_k, ini_hp, kern_0, kern_i, ini_tau_i_k, common_hp_k, common_hp_i)
+    }
+    model[['BIC']] = BIC(model$hp, db, kern_0, kern_i, prior_mean_k, model$param, K != 1)
+    return(model)
+  }
+  res = k_grid %>% sapply(floop, simplify = FALSE, USE.NAMES = TRUE) %>% setNames(paste0('K = ', k_grid))
+  
+  db_plot = tibble('K' = k_grid, 'BIC' = res %>% map_dbl('BIC'))
+  
+  res$K_max_BIC = db_plot %>% filter(BIC == max(BIC)) %>% pull(K)
+  
+  if(plot)
+  {
+    res$plot = ggplot(db_plot, aes(x = K, y = BIC)) + geom_point() +
+      geom_line() + theme_classic()
+  }
+  
+  return(res)
+}
+
 train_new_gp_EM = function(db, param_mu_k, ini_hp, kern_i, hp_i = NULL)
 {
   mean_mu_k = param_mu_k$mean
   cov_mu_k = param_mu_k$cov
   pi_k = lapply(param_mu_k$tau_i_k, function(x) Reduce("+", x)/ length(x))
   if(is.null(hp_i))
-    {
+  {
     n_loop_max = 25
     hp = ini_hp$theta_i
-  
+    
     for(i in 1:n_loop_max)
     { 
-    ## E step
-    tau_k = update_tau_star_k_EM(db, mean_mu_k, cov_mu_k, kern_i, hp, pi_k)
-  
-    ## M step
-    LL_GP<- function(hp, db, kern_i) 
-    {
-      floop = function(k)
+      ## E step
+      tau_k = update_tau_star_k_EM(db, mean_mu_k, cov_mu_k, kern_i, hp, pi_k)
+      
+      ## M step
+      LL_GP<- function(hp, db, kern_i) 
       {
-        t = db$Timestamp
-        - tau_k[[k]] * dmvnorm(db$Output, mean_mu_k[[k]] %>% filter(Timestamp %in% t) %>% pull(Output), 
-                             solve(kern_to_cov(db$Timestamp, kern_i, theta = hp[1:2], sigma = hp[3]) +
-                                   cov_mu_k[[k]][paste0('X',t), paste0('X',t)] ),
-                                   log = T) %>% return()
+        floop = function(k)
+        {
+          mean = mean_mu_k[[k]] %>% filter(Timestamp %in% t) %>% pull(Output)
+          cov = (kern_to_cov(db$Timestamp, kern_i, theta = hp[1:2], sigma = hp[3]) +
+                   cov_mu_k[[k]][paste0('X',t), paste0('X',t)])
+          inv = tryCatch(solve(cov), error = function(e){MASS::ginv(cov)})
+          
+          (db$Timestamp - tau_k[[k]] * dmvnorm(db$Output, mean, inv, log = T)) %>%
+            return()
+        }
+        sapply(names(mean_mu_k), floop) %>% sum() %>% return()
       }
-      sapply(names(mean_mu_k), floop) %>% sum() %>% return()
+      new_hp = opm(hp, LL_GP, db = db, kern = kern_i, method = "L-BFGS-B", control = list(kkt = FALSE))[1,1:3] 
+      if(new_hp %>% anyNA(recursive = T))
+      {
+        print(paste0('The M-step encountered an error at iteration : ', i))
+        print('Training has stopped and the function returns values from the last valid iteration')
+        break
+      }
+      
+      ## Testing the stoping condition
+      eps = (new_hp - hp) %>% abs %>% sum
+      print(c('tau_k', tau_k %>% unlist))
+      print(c('eps', eps))
+      if(eps>0 & eps < 1e-3)
+      {
+        cv = 'TRUE'
+        break
+      }
+      hp = new_hp
     }
-    new_hp = opm(hp, LL_GP, db = db, kern = kern_i, method = "L-BFGS-B", control = list(kkt = FALSE))[1,1:3] 
-    if(new_hp %>% anyNA(recursive = T))
-    {
-      print(paste0('The M-step encountered an error at iteration : ', i))
-      print('Training has stopped and the function returns values from the last valid iteration')
-      break
-    }
-    
-    ## Testing the stoping condition
-    eps = (new_hp - hp) %>% abs %>% sum
-    print(c('tau_k', tau_k %>% unlist))
-    print(c('eps', eps))
-    if(eps>0 & eps < 1e-3)
-    {
-      cv = 'TRUE'
-      break
-    }
-    hp = new_hp
-  }
   }
   else
   {
@@ -156,8 +198,8 @@ posterior_mu_k = function(db, timestamps, m_k, kern_0, kern_i, list_hp)
   floop = function(k)
   {
     new_inv = update_inv_VEM(prior_inv = inv_k[[k]], list_inv_i = inv_i, tau_i_k[[k]])
-    #new_cov = tryCatch(solve(new_inv), error = function(e){MASS::ginv(new_inv)}) ## fast or slow matrix inversion if singular
-    solve(new_inv) %>% return()
+    tryCatch(solve(new_inv), error = function(e){MASS::ginv(new_inv)}) %>%
+      return()
   }
   cov_k = sapply(names(hp_k), floop, simplify = FALSE, USE.NAMES = TRUE)
   
@@ -192,21 +234,22 @@ pred_gp_clust = function(db, timestamps = NULL, list_mu, kern, hp)
   theta = hp$theta_new[1:2]
   sigma = hp$theta_new[3]
   tau_k = hp$tau_k
-
+  
   floop = function(k)
   {
     mean_mu_obs = list_mu$mean[[k]] %>% filter(Timestamp %in% tn) %>% pull(Output)
     mean_mu_pred = list_mu$mean[[k]] %>% filter(Timestamp %in% timestamps) %>% pull(Output)
     cov_mu = list_mu$cov[[k]]
     
-    inv_mat = (kern_to_cov(tn, kern, theta, sigma) + cov_mu[input, input]) %>% solve() 
+    cov_tn_tn = (kern_to_cov(tn, kern, theta, sigma) + cov_mu[input, input])
+    inv_mat = tryCatch(solve(cov_tn_tn), error = function(e){MASS::ginv(cov_tn_tn)}) 
     cov_tn_t = kern(mat_dist(tn, timestamps), theta) + cov_mu[input,input_t]
     cov_t_t = kern_to_cov(timestamps, kern, theta, sigma) + cov_mu[input_t ,input_t] 
-  
+    
     tibble('Timestamp' = timestamps, 
-         'Mean' = (mean_mu_pred + t(cov_tn_t) %*% inv_mat %*% (yn - mean_mu_obs)) %>% as.vector(),
-         'Var' =  (cov_t_t - t(cov_tn_t) %*% inv_mat %*% cov_tn_t) %>% diag %>% as.vector,
-         'tau_k' = tau_k[[k]]) %>% return()
+           'Mean' = (mean_mu_pred + t(cov_tn_t) %*% inv_mat %*% (yn - mean_mu_obs)) %>% as.vector(),
+           'Var' =  (cov_t_t - t(cov_tn_t) %*% inv_mat %*% cov_tn_t) %>% diag %>% as.vector,
+           'tau_k' = tau_k[[k]]) %>% return()
   }
   pred = sapply(names(list_mu$mean), floop, simplify = FALSE, USE.NAMES = TRUE)
   
@@ -225,8 +268,15 @@ pred_gp_clust_animate = function(db, timestamps = NULL, list_mu, kern, hp)
   
   for(j in 1:nrow(db))
   {
-    pred_j = pred_gp_clust(db[1:j,], timestamps, list_mu, kern, hp) %>% mutate(Nb_data = j)
-    all_pred = all_pred %>% rbind(pred_j)
+    pred_j = pred_gp_clust(db[1:j,], timestamps, list_mu, kern, hp)
+    
+    for(k in list_mu$mean %>% names)
+    {
+      pred_j[[k]] = pred_j[[k]] %>% mutate(Nb_data = j, Cluster = k)
+    }
+    pred_j_all = pred_j %>% bind_rows
+    
+    all_pred = all_pred %>% rbind(pred_j_all)
   }
   return(all_pred)
 }
@@ -279,21 +329,22 @@ full_algo_clust = function(db, new_db, timestamps, kern_i, ini_tau_i_k = NULL, c
 
 pred_max_cluster = function(tau_i_k)
 { 
-  tau_i_k %>% as.tibble %>% unnest %>% apply(1, which.max) %>% return()
+  tau_i_k %>% as_tibble %>% unnest %>% apply(1, which.max) %>% return()
 }
 
 ################ PLOT FUNCTIONS ######################
 
-plot_db = function(db, cluster = F)
+plot_db = function(db, cluster = F, legend = F)
 { ## Visualize smoothed raw data. Format : ID, Timestamp, Output
   if(cluster)
   {
     ggplot(db) + geom_smooth(aes(Timestamp, Output, group = ID, color = Cluster)) +
-                 geom_point(aes(Timestamp, Output, group = ID, color = Cluster))
+      geom_point(aes(Timestamp, Output, group = ID, color = Cluster)) + guides(col = legend)
   }
   else
   {
-    ggplot(db) + geom_smooth(aes(Timestamp, Output, color = ID)) + geom_point(aes(Timestamp, Output, color = ID))
+    ggplot(db) + geom_smooth(aes(Timestamp, Output, color = ID)) +
+      geom_point(aes(Timestamp, Output, color = ID)) + guides(col = legend)
   }
 }
 
@@ -310,19 +361,19 @@ plot_gp_clust = function(pred, cluster = 'all', data = NULL, data_train = NULL, 
   #browser()
   if(cluster == 'all')
   { mean_all = 0
-    for(k in names(pred))
-    {
-      mean_all = mean_all + pred[[k]]$tau_k * pred[[k]]$Mean
-    }
-    pred_gp = tibble('Timestamp' = pred[[1]]$Timestamp, 'Mean' = mean_all, 'Var' = 0)
+  for(k in names(pred))
+  {
+    mean_all = mean_all + pred[[k]]$tau_k * pred[[k]]$Mean
+  }
+  pred_gp = tibble('Timestamp' = pred[[1]]$Timestamp, 'Mean' = mean_all, 'Var' = 0)
   }
   else{pred_gp = pred[[cluster]]}
-
-        gg = ggplot() +
-             geom_line(data = pred_gp, aes(x = Timestamp, y = Mean), color = 'blue') +
-             geom_ribbon(data = pred_gp, aes(x = Timestamp, ymin = Mean - 1.96* sqrt(Var),
+  
+  gg = ggplot() +
+    geom_line(data = pred_gp, aes(x = Timestamp, y = Mean), color = 'blue') +
+    geom_ribbon(data = pred_gp, aes(x = Timestamp, ymin = Mean - 1.96* sqrt(Var),
                                     ymax = Mean +  1.96* sqrt(Var)), alpha = 0.2) + ylab('Output')
-
+  
   if(!is.null(data_train))
   {
     if(col_clust){gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = Cluster), shape = 4)}
@@ -341,7 +392,8 @@ plot_gp_clust = function(pred, cluster = 'all', data = NULL, data_train = NULL, 
 }
 
 plot_heat_clust =  function(pred, ygrid, data = NULL, data_train = NULL,
-                            mean_k = NULL,  col_clust = T, interactive = F, legend = F)
+                            mean_k = NULL,  col_clust = T, interactive = F, legend = F, 
+                            animate = F)
 { ## pred: tibble coming out of the pred_gp_lust() function
   ## cluster : string indicating the cluster to plot from or 'all' for the full GPs mixture.
   ## data : tibble of observational data for the new individual, columns required : 'Timestamp', 'Output' (optional)
@@ -355,34 +407,56 @@ plot_heat_clust =  function(pred, ygrid, data = NULL, data_train = NULL,
   #browser()
   combine = function(pred, y, y_decal)
   { proba = 0
-    for(k in names(pred))
-    {
-      pred_gp = pred[[k]]
-      proba = proba + pred_gp$tau_k * (pnorm(y, mean = pred_gp$Mean, sd =  sqrt(pred_gp$Var)) -
-                                       pnorm(y_decal, mean = pred_gp$Mean, sd =  sqrt(pred_gp$Var)))
-    }
-    tibble('Ygrid' = y, 'Timestamp' = pred[[1]]$Timestamp, 'Proba' = proba) %>% return
-  }
-
-  y_decal = ygrid[1]
-  db_heat = c()
-  for(i in ygrid[-1])
+  for(k in pred$Cluster %>% unique)
   {
-    db_heat = db_heat %>% rbind(combine(pred, i, y_decal))
-    y_decal = i 
+    #pred_gp = pred[[k]]
+    pred_gp = pred %>% filter(Cluster == k)
+    proba = proba + pred_gp$tau_k * (pnorm(y, mean = pred_gp$Mean, sd =  sqrt(pred_gp$Var)) -
+                                       pnorm(y_decal, mean = pred_gp$Mean, sd =  sqrt(pred_gp$Var)))
   }
-    
-  gg = ggplot(db_heat) + geom_tile(aes(Timestamp, Ygrid, fill = Proba)) + 
-       #scale_fill_gradientn(low = "white", high = "darkblue") +
-       scale_fill_gradientn(colours=c('white', '#AB47BC', '#9C27B0','#8E24AA','#7B1FA2', '#6A1B9A', '#4A148C')) + 
-       #scale_fill_distiller(palette = "RdPu", trans = "reverse") + 
-       theme_classic() + ylab("Output") + labs(fill = "Proba")
-
+  tibble('Ygrid' = y, 'Timestamp' = pred %>% filter(Cluster == k) %>% pull(Timestamp),
+         'Proba' = proba) %>% return()
+  }
+  
+  if(animate)
+  {
+    db_heat = c()
+    for(a in pred$Nb_data %>% unique)
+    {
+      y_decal = ygrid[1]
+      db_h = c()
+      for(i in ygrid[-1])
+      {
+        db_h = db_h %>% rbind(combine(pred %>% filter(Nb_data == a), i, y_decal))
+        y_decal = i 
+      }      
+      db_h = db_h %>% mutate(Nb_data = a)
+      db_heat = db_heat %>% rbind(db_h)
+    }
+  }
+  
+  else
+  {
+    y_decal = ygrid[1]
+    db_heat = c()
+    for(i in ygrid[-1])
+    {
+      db_heat = db_heat %>% rbind(combine(pred, i, y_decal))
+      y_decal = i 
+    }
+  }
+  
+  gg = ggplot() + geom_tile(data = db_heat, aes(Timestamp, Ygrid, fill = Proba)) + 
+    #scale_fill_gradientn(low = "white", high = "darkblue") +
+    scale_fill_gradientn(colours=c('white', '#AB47BC', '#9C27B0','#8E24AA','#7B1FA2', '#6A1B9A', '#4A148C')) + 
+    #scale_fill_distiller(palette = "RdPu", trans = "reverse") + 
+    theme_classic() + ylab("Output") + labs(fill = "Proba")
+  
   ## Display data/training data/mean process if provided
   if(!is.null(data_train))
   {
     if(col_clust){gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = Cluster), shape = 4)}
-    else{gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = ID), shape = 4)}
+    else{gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = ID), size = 0.4, alpha = 0.5)}
   }
   if(!is.null(data)){gg = gg + geom_point(data = data, aes(x = Timestamp, y = Output), size = 2, shape = 18)}
   if(!is.null(mean))
@@ -399,13 +473,13 @@ plot_heat_clust =  function(pred, ygrid, data = NULL, data_train = NULL,
   return(gg + guides(col = legend))
 }
 
-plot_animate_clust = function(pred_gp, data = NULL, data_train = NULL, mean = NULL, mean_CI = F, file = "gganim.gif")
+plot_animate_clust = function(pred_gp, ygrid, data = NULL, data_train = NULL, mean_k = NULL, file = "gganim.gif")
 { ## pred_gp : tibble coming out of the pred_gp_animate() function, columns required : 'Timestamp', 'Mean', 'Var'
   ## data : tibble of observational data, columns required : 'Timestamp', 'Output' (Optional)
   ####
   ## return : plot the animated curves of the GP with the 0.95 confidence interval (optional display raw data)
-
-  gg = plot_gp_clust(pred_gp, data, data_train, mean, mean_CI) +
+  
+  gg = plot_heat_clust(pred_gp, ygrid, data, data_train, mean_k, col_clust = F, animate = T) +
     transition_states(Nb_data, transition_length = 2, state_length = 1)
   animate(gg, renderer = gifski_renderer(file)) %>% return()
 }
@@ -434,27 +508,28 @@ simu_indiv = function(ID, t, kern = kernel_mu, k, theta, mean, var)
 
 #set.seed(42)
 
-M = 10
-N = 10
+M = 100
+N = 20
 t = matrix(0, ncol = N, nrow = M)
-for(i in 1:M){t[i,] = sample(seq(10, 20, 0.01),N, replace = F) %>% sort()}
+t_i = sample(seq(10, 20, 0.01),N , replace = F) 
+for(i in 1:M){t[i,] = t_i %>% sort()}
 
 db_train = c()#simu_indiv(ID = '1', t[1,], kernel_mu, theta = c(2,1), mean = 0, var = 0.5)
 for(i in 1:M)
 {
   k = i %% 3
-  if(k == 0){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 1, theta = c(2,1), mean = -10, var = 0.5))}
-  if(k == 1){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 2, theta = c(2,1), mean = 0, var = 0.5))}
-  if(k == 2){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 3, theta = c(2,1), mean = 10, var = 0.5))}
+  if(k == 0){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 1, theta = c(2,1), mean = -20, var = 0.1))}
+  if(k == 1){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 2, theta = c(2,1), mean = 0, var = 0.1))}
+  if(k == 2){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 3, theta = c(2,1), mean = 20, var = 0.1))}
   #if(k == 3){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 4, theta = c(1,2), mean = 35, var = 0.4))}
   #if(k == 4){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 5,theta = c(1,1), mean = 55, var = 0.5))}
 }
 
 db_obs_test = simu_indiv(ID = M+1, sample(seq(10, 20, 0.01), N, replace = F) %>%
-                                   sort(), kernel_mu, k = 3, theta = c(2,1), mean = 0, var = 0.5)
+                           sort(), kernel_mu, k = 3, theta = c(2,1), mean = 0, var = 0.5)
 
 ################ INITIALISATION ######################
-# ini_hp = list('theta_k' = c(1,1), 'theta_i' = c(1, 1, 0.2))
+#ini_hp = list('theta_k' = c(1,1), 'theta_i' = c(1, 1, 0.2))
 
 ini_kmeans = function(db, k, nstart = 50, summary = F)
 {
@@ -471,35 +546,36 @@ ini_kmeans = function(db, k, nstart = 50, summary = F)
       tibble('ID' = i,
              'Timestamp' = seq_len(3) ,
              'Output' = c(min(obs_i), mean(obs_i) , max(obs_i)) ) %>% 
-      return()
+        return()
     }  
     db_regular = unique(db$ID) %>% lapply(floop) %>% bind_rows
   }
   else{db_regular = db}
   
   res = db_regular %>% dplyr::select(c(ID, Timestamp, Output)) %>% 
-                       spread(key =  Timestamp, value = Output) %>%
-                       dplyr::select(-ID) %>% 
-                       kmeans(centers = k, nstart = nstart)
+    spread(key =  Timestamp, value = Output) %>%
+    dplyr::select(-ID) %>% 
+    kmeans(centers = k, nstart = nstart)
   
   if(summary){res %>% print}
   
   broom::augment(res, db_regular %>% spread(key =  Timestamp, value = Output)) %>%
-                                     dplyr::select(c(ID, .cluster)) %>% 
-                                     rename(Cluster_ini = .cluster) %>% 
-                                     mutate(Cluster_ini = paste0('K', .$Cluster_ini)) %>% 
-                                     return()
+    dplyr::select(c(ID, .cluster)) %>% 
+    rename(Cluster_ini = .cluster) %>% 
+    mutate(Cluster_ini = paste0('K', .$Cluster_ini)) %>% 
+    return()
 }
 
 ini_tau_i_k = function(db, k, nstart = 50)
 {
   ini_kmeans(db, k, nstart) %>% mutate(value = 1) %>%
-                                spread(key = Cluster_ini, value = value, fill = 0) %>% 
-                                arrange(as.integer(ID)) %>% 
-                                column_to_rownames(var = "ID") %>%
-                                apply(2, as.list) %>% 
-                                return()
+    spread(key = Cluster_ini, value = value, fill = 0) %>% 
+    arrange(as.integer(ID)) %>% 
+    column_to_rownames(var = "ID") %>%
+    apply(2, as.list) %>% 
+    return()
 }
+
 
 ## TEST ####
 # k = seq_len(3)
