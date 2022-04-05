@@ -13,8 +13,12 @@ library(png)
 source('Computing_functions.R')
 
 ################ TRAINING FUNCTIONS ####
-training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2), 'theta_i' = c(1, 1, 0.2)),
-                        kern_0 = kernel_mu, kern_i = kernel, ini_tau_i_k = NULL, common_hp_k = T, common_hp_i = T)
+training_VEM = function(db, prior_mean_k,
+                        ini_hp = list('theta_k' = c(1, 1, 0.2),
+                                      'theta_i' = c(1, 1, 0.2)),
+                        kern_0 = kernel_mu, kern_i = kernel,
+                        ini_tau_i_k = NULL, common_hp_k = T,
+                        common_hp_i = T)
 { ## db : database with all individuals in training set. Column required : 'ID', Timestamp',  'Output'
   ## prior_mean : prior mean parameter of the K mean GPs (mu_k)
   ## ini_hp : initial values of HP for the kernels
@@ -35,7 +39,8 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
   hp[['pi_k']] = sapply( tau_i_k, function(x) x %>% unlist() %>% mean() ) 
   logLL_monitoring = - Inf
   t1 = Sys.time()
-  
+  seq_logL = c()
+  seq_ari = c()
   for(i in 1:n_loop_max)
   { 
     print(i)
@@ -43,9 +48,9 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
     param = e_step_VEM(db, prior_mean_k, kern_0, kern_i, hp, tau_i_k)  
     
     ## Monitoring of the LL
-    new_logLL_monitoring = logL_monitoring_VEM(hp, db, kern_i, kern_0, mu_k_param = param , m_k = prior_mean_k) 
-    #0.5 * (length(param$cov) * nrow(param$cov[[1]]) +
-    #Reduce('+', lapply(param$cov, function(x) log(det(x)))) )
+    new_logLL_monitoring = logL_monitoring_VEM(hp, db, kern_i, kern_0, mu_k_param = param , m_k = prior_mean_k) + 
+      0.5 * (length(param$cov) * nrow(param$cov[[1]]) +
+      Reduce('+', lapply(param$cov, function(x) log(det(x)))) )
     print(new_logLL_monitoring)
     diff_moni = new_logLL_monitoring - logLL_monitoring
     
@@ -67,6 +72,14 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
       abs(logL_new)
     
     print(c('eps', eps))
+    ## Temporary functions for tracking evolution per iteration
+    
+    seq_logL = c(seq_logL, new_logLL_monitoring)
+    pred_clust = pred_max_cluster(param$tau_i_k)
+    true_clust = db %>% select(ID, Cluster) %>% unique() %>%
+      pull(Cluster) %>% substr(2,2) %>% as.numeric()
+    seq_ari = c(seq_ari, rand.index(pred_clust, true_clust))
+    ##
     if(eps < 1e-1)
     {
       if(eps > 0){hp = new_hp}
@@ -76,10 +89,12 @@ training_VEM = function(db, prior_mean_k, ini_hp = list('theta_k' = c(1, 1, 0.2)
     hp = new_hp
     tau_i_k = param$tau_i_k
     logLL_monitoring = new_logLL_monitoring
+    
   }
   t2 = Sys.time()
   list('hp' = new_hp, 'convergence' = cv,  'param' = param,
-       'Time_train' =  difftime(t2, t1, units = "secs")) %>% 
+       'Time_train' =  difftime(t2, t1, units = "secs"), 
+       'logL_iterations' = seq_logL, 'ARI_iterations' = seq_ari) %>% 
     return()
 }
 
@@ -323,13 +338,18 @@ full_algo_clust = function(db, new_db, timestamps, kern_i, ini_tau_i_k = NULL, c
   # }
   
   list('Prediction' = pred, 'Mean_processes' = mu_k,
-       'Hyperparameters' = list('other_i' = list_hp, 'new_i' = hp_new_i)) %>% 
+       'Hyperparameters' = list('other_i' = list_hp, 'new_i' = hp_new_i), 
+       'logL_iterations' = list_hp$logL_iterations,
+       'ari_iterations' = list_hp$ARI_iterations) %>% 
     return()
 }
 
 pred_max_cluster = function(tau_i_k)
 { 
-  tau_i_k %>% as_tibble %>% unnest %>% apply(1, which.max) %>% return()
+  tau_i_k %>%
+    as_tibble %>%
+    unnest %>%
+    apply(1, which.max) %>% return()
 }
 
 ################ PLOT FUNCTIONS ######################

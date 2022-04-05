@@ -236,7 +236,7 @@ RI = function(group1, group2)
 {
   g1 = group1 %>% as.factor %>% as.integer
   g2 = group2 %>% as.factor %>% as.integer
-  
+  # 
   # if( n_distinct(g1) == n_distinct(g2) ){rand.index(g1, g2) %>% return()}
   # else{adj.rand.index(g1, g2) %>% return()}
   adj.rand.index(g1, g2) %>% return()
@@ -916,6 +916,7 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 # 
 
 ##### CLUST: ILLUSTRATION EXAMPLE ####
+set.seed(42)
 both_db = simu_scheme()
 db_i = both_db$db_i
 db_k = both_db$db_k
@@ -923,7 +924,9 @@ plot_db(db_k)
 plot_db(db_i, cluster= T)
 db_obs = db_i %>% filter(ID == 1)
 
-### Simple situation and comparision with GP and MAGMA
+### Simple situation and comparison with GP and MAGMA
+
+## Magma
 pred = full_algo(db_i %>% filter(ID != 6), db_obs[1:14,], seq(0,11.5, 0.01), kernel, common_hp = T, plot = F, prior_mean = 0,
                  kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp, hp_new_i = NULL)
 
@@ -939,20 +942,42 @@ pred_one = pred_gp(db_obs[1:14,], timestamps = seq(0,11.5, 0.01), mean_mu = 0, c
 ex_gp = plot_gp(pred_one, data = db_obs[1:14,]) + geom_point(data = db_obs[15:30,],
                                                              aes(Timestamp, Output), color ='red') + theme_classic()
 
+## MagmaClust
+k = 1:3 
+ini_hp_test = list('theta_k' = c(2, 0.5, 0.2), 'theta_i' = c(1, 1, 0.2))
+
 tau_i_k = replicate(length(k), rep(1,length(unique(db_i$ID[-1])))) %>%
   apply(1,function(x) x / sum(x)) %>%
   `rownames<-`(paste0('K', k)) %>%
   `colnames<-`(unique(db_i$ID[-1])) %>%
   apply(1, as.list)
 
-pred_clust = full_algo_clust(db_i %>% filter(ID != 19), db_obs[1:14,], seq(0,11.5, 0.01), kernel, tau_i_k,
-                             common_hp_k = T, common_hp_i = T, prior_mean = list('K1' = -5, 'K2' = 0, 'K3' = 20),
+pred_clust = full_algo_clust(db_i, db_obs[1:14,], seq(0,11.5, 0.01), kernel, tau_i_k,
+                             common_hp_k = T, common_hp_i = T, prior_mean = list('K1' = 10, 'K2' = 20, 'K3' = 30),
                              kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp_test, hp_new_i = NULL)
 
-ex_clust_all = plot_gp_clust(pred_clust, cluster= 'all', data = db_obs[1:14,],  mean = T, col_clust = T) +
+ex_clust_all = plot_gp_clust(pred_clust$Prediction, cluster= 'all', data = db_obs[1:14,],
+                             mean = pred_clust$Mean_processes, col_clust = T) +
   geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
   guides(color = FALSE) + geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red')+
   theme_classic()
+
+## Graph of the increasing log-Likelihood
+db_logL = tibble('logL' = pred_clust$logL_iterations,
+                 'iter' = 1:length(pred_clust$logL_iterations), 
+                 'ari' = pred_clust$ari_iterations)
+png("logL.png",res=600, height=120, width= 352, units="mm")
+  gg1 = ggplot(db_logL) + geom_line(aes(x = iter, y = logL), linetype = 8) + 
+    geom_point(aes(x = iter, y = logL)) + xlab('Iteration') +
+    ylab('Evidence Lower Bound') + scale_x_continuous(breaks=seq(1, 10, 1)) +
+    theme_classic()
+  gg2 = ggplot(db_logL) + geom_line(aes(x = iter, y = ari), linetype = 8) + 
+    geom_point(aes(x = iter, y = ari)) + xlab('Iteration') +
+    ylab('Adjusted Rand Index') + scale_x_continuous(breaks=seq(1, 10, 1)) +
+    ylim(0,1) + theme_classic()
+  grid.arrange(gg1, gg2, ncol = 2, nrow = 1)
+dev.off()
+##
 
 #  png("illu_2_other_clusters.png",res=600, height=120, width= 352, units="mm")
 # # grid.arrange(ex_gp, ex_magma, ex_clust, nrow = 3)
