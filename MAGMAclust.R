@@ -75,10 +75,10 @@ training_VEM = function(db, prior_mean_k,
     ## Temporary functions for tracking evolution per iteration
     
     seq_logL = c(seq_logL, new_logLL_monitoring)
-    pred_clust = pred_max_cluster(param$tau_i_k)
-    true_clust = db %>% select(ID, Cluster) %>% unique() %>%
-      pull(Cluster) %>% substr(2,2) %>% as.numeric()
-    seq_ari = c(seq_ari, rand.index(pred_clust, true_clust))
+    # pred_clust = pred_max_cluster(param$tau_i_k)
+    # true_clust = db %>% select(ID, Cluster) %>% unique() %>%
+    #   pull(Cluster) %>% substr(2,2) %>% as.numeric()
+    # seq_ari = c(seq_ari, rand.index(pred_clust, true_clust))
     ##
     if(eps < 1e-1)
     {
@@ -94,7 +94,7 @@ training_VEM = function(db, prior_mean_k,
   t2 = Sys.time()
   list('hp' = new_hp, 'convergence' = cv,  'param' = param,
        'Time_train' =  difftime(t2, t1, units = "secs"), 
-       'logL_iterations' = seq_logL, 'ARI_iterations' = seq_ari) %>% 
+       'logL_iterations' = seq_logL) %>% 
     return()
 }
 
@@ -106,6 +106,7 @@ model_selection = function(db, k_grid = 1:5, ini_hp = list('theta_k' = c(1, 1, 0
   {
     print(paste0('K = ', K))
     prior_mean_k = rep(0, K) %>% setNames(paste0('K', seq_len(K))) %>% as.list
+    if(is.null(ini_tau_i_k)){ini_tau_i_k = ini_tau_i_k(db, K)}
     
     if(K == 1)
     {
@@ -133,7 +134,7 @@ model_selection = function(db, k_grid = 1:5, ini_hp = list('theta_k' = c(1, 1, 0
   return(res)
 }
 
-train_new_gp_EM = function(db, param_mu_k, ini_hp, kern_i, hp_i = NULL)
+train_new_gp_EM = function(db, param_mu_k, ini_hp = NULL, kern_i, hp_i = NULL)
 {
   mean_mu_k = param_mu_k$mean
   cov_mu_k = param_mu_k$cov
@@ -204,7 +205,8 @@ posterior_mu_k = function(db, timestamps, m_k, kern_0, kern_i, list_hp)
   hp_k = list_hp$hp$theta_k
   for(k in names(hp_k)){hp_k[[k]][3] = 0.1}
   tau_i_k = list_hp$param$tau_i_k
-  t_clust = tibble('ID' = rep(names(hp_k), each = length(timestamps)) , 'Timestamp' = rep(timestamps, length(hp_k)))
+  t_clust = tibble('ID' = rep(names(hp_k), each = length(timestamps)),
+                   'Timestamp' = rep(timestamps, length(hp_k)))
   inv_k = kern_to_inv(t_clust, kern_0, hp_k, sigma = 0)
   inv_i = kern_to_inv(db, kern_i, hp_i, sigma = 0)
   value_i = base::split(db$Output, list(db$ID))
@@ -348,7 +350,7 @@ pred_max_cluster = function(tau_i_k)
 { 
   tau_i_k %>%
     as_tibble %>%
-    unnest %>%
+    unnest(cols = c()) %>%
     apply(1, which.max) %>% return()
 }
 
@@ -358,14 +360,19 @@ plot_db = function(db, cluster = F, legend = F)
 { ## Visualize smoothed raw data. Format : ID, Timestamp, Output
   if(cluster)
   {
-    ggplot(db) + geom_smooth(aes(Timestamp, Output, group = ID, color = Cluster)) +
-      geom_point(aes(Timestamp, Output, group = ID, color = Cluster)) + guides(col = legend)
+    gg = ggplot(db) +
+      geom_smooth(aes(Timestamp, Output, group = ID, color = Cluster), se = FALSE) +
+      geom_point(aes(Timestamp, Output, group = ID, color = Cluster)) + theme_classic()
   }
   else
   {
-    ggplot(db) + geom_smooth(aes(Timestamp, Output, color = ID)) +
-      geom_point(aes(Timestamp, Output, color = ID)) + guides(col = legend)
+    gg = ggplot(db) +
+      geom_smooth(aes(Timestamp, Output, color = ID), se = FALSE) +
+      geom_point(aes(Timestamp, Output, color = ID)) + theme_classic()
   }
+  
+  if(!legend){gg = gg + guides(col = 'none') }
+  return(gg)
 }
 
 plot_gp_clust = function(pred, cluster = 'all', data = NULL, data_train = NULL, mean_k = NULL,
@@ -396,8 +403,8 @@ plot_gp_clust = function(pred, cluster = 'all', data = NULL, data_train = NULL, 
   
   if(!is.null(data_train))
   {
-    if(col_clust){gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = Cluster), shape = 4)}
-    else{gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = ID), shape = 4)}
+    if(col_clust){gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = Cluster), size = 0.5)}
+    else{gg = gg + geom_point(data = data_train, aes(x = Timestamp, y = Output, col = ID), size = 0.5)}
   }
   if(!is.null(data)){gg = gg + geom_point(data = data, aes(x = Timestamp, y = Output), size = 2, shape = 18)}
   if(!is.null(mean_k))
@@ -408,7 +415,8 @@ plot_gp_clust = function(pred, cluster = 'all', data = NULL, data_train = NULL, 
                           aes(x = Timestamp, y = Output), linetype = 'dashed') 
     }
   }
-  return(gg + guides(col = legend))
+  if(!legend){gg = gg + guides(col = 'none')}
+  return(gg)
 }
 
 plot_heat_clust =  function(pred, ygrid, data = NULL, data_train = NULL,
@@ -527,26 +535,26 @@ simu_indiv = function(ID, t, kern = kernel_mu, k, theta, mean, var)
 }
 
 #set.seed(42)
-
-M = 100
-N = 20
-t = matrix(0, ncol = N, nrow = M)
-t_i = sample(seq(10, 20, 0.01),N , replace = F) 
-for(i in 1:M){t[i,] = t_i %>% sort()}
-
-db_train = c()#simu_indiv(ID = '1', t[1,], kernel_mu, theta = c(2,1), mean = 0, var = 0.5)
-for(i in 1:M)
-{
-  k = i %% 3
-  if(k == 0){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 1, theta = c(2,1), mean = -20, var = 0.1))}
-  if(k == 1){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 2, theta = c(2,1), mean = 0, var = 0.1))}
-  if(k == 2){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 3, theta = c(2,1), mean = 20, var = 0.1))}
-  #if(k == 3){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 4, theta = c(1,2), mean = 35, var = 0.4))}
-  #if(k == 4){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 5,theta = c(1,1), mean = 55, var = 0.5))}
-}
-
-db_obs_test = simu_indiv(ID = M+1, sample(seq(10, 20, 0.01), N, replace = F) %>%
-                           sort(), kernel_mu, k = 3, theta = c(2,1), mean = 0, var = 0.5)
+#
+# M = 100
+# N = 20
+# t = matrix(0, ncol = N, nrow = M)
+# t_i = sample(seq(10, 20, 0.01),N , replace = F) 
+# for(i in 1:M){t[i,] = t_i %>% sort()}
+# 
+# db_train = c()#simu_indiv(ID = '1', t[1,], kernel_mu, theta = c(2,1), mean = 0, var = 0.5)
+# for(i in 1:M)
+# {
+#   k = i %% 3
+#   if(k == 0){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 1, theta = c(2,1), mean = -20, var = 0.1))}
+#   if(k == 1){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 2, theta = c(2,1), mean = 0, var = 0.1))}
+#   if(k == 2){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 3, theta = c(2,1), mean = 20, var = 0.1))}
+#   #if(k == 3){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 4, theta = c(1,2), mean = 35, var = 0.4))}
+#   #if(k == 4){db_train = rbind(db_train, simu_indiv(ID = i, t[i,], kernel_mu, k = 5,theta = c(1,1), mean = 55, var = 0.5))}
+# }
+# 
+# db_obs_test = simu_indiv(ID = M+1, sample(seq(10, 20, 0.01), N, replace = F) %>%
+#                            sort(), kernel_mu, k = 3, theta = c(2,1), mean = 0, var = 0.5)
 
 ################ INITIALISATION ######################
 #ini_hp = list('theta_k' = c(1,1), 'theta_i' = c(1, 1, 0.2))
@@ -590,7 +598,6 @@ ini_tau_i_k = function(db, k, nstart = 50)
 {
   ini_kmeans(db, k, nstart) %>% mutate(value = 1) %>%
     spread(key = Cluster_ini, value = value, fill = 0) %>% 
-    arrange(as.integer(ID)) %>% 
     column_to_rownames(var = "ID") %>%
     apply(2, as.list) %>% 
     return()

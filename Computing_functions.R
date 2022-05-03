@@ -160,7 +160,10 @@ kern_to_inv = function(x, kern = kernel, theta = c(1, 0.5), sigma = 0.2)
         names(theta) = i
       }
       
-      indiv = x %>% filter(ID == i) %>% arrange(Timestamp) %>% pull(Timestamp) %>% sort()
+      indiv = x %>% filter(ID == i) %>%
+        arrange(Timestamp) %>%
+        pull(Timestamp) %>%
+        sort()
       if(length(indiv) == 1)
       {
         mat = theta[[i]][3]^2 + exp(theta[[i]][1])
@@ -168,7 +171,8 @@ kern_to_inv = function(x, kern = kernel, theta = c(1, 0.5), sigma = 0.2)
       else 
       {
         M = dist(indiv)^2
-        mat = as.matrix(kern(M, theta[[i]][1:2])) + diag(theta[[i]][3]^2 + exp(theta[[i]][1]), length(indiv))
+        mat = as.matrix(kern(M, theta[[i]][1:2])) +
+          diag(theta[[i]][3]^2 + exp(theta[[i]][1]), length(indiv))
       }
       inv = tryCatch(solve(mat), error = function(e){MASS::ginv(mat)})
       #inv = solve(mat)
@@ -759,7 +763,6 @@ update_tau_i_k_VEM = function(db, m_k, mean_k, cov_k, kern_i, hp, pi_k)
 
 update_tau_star_k_EM = function(db, mean_k, cov_k, kern, hp, pi_k)
 {
-  #browser()
   names_k = names(mean_k)
   c_k = 0
   mat_logL = rep(NA, length(names_k))
