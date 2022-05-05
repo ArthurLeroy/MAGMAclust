@@ -29,7 +29,6 @@ split_times = function(db, prop_test)
   db %>% ungroup() %>% mutate(Observed = ifelse(db$Row %in% row_obs, 1, 0)) %>% dplyr::select(- Row) %>% return()
 }
 
-
 #### EVALUATION FUNCTIONS ####
 MSE_clust = function(obs, pred)
 {
@@ -71,18 +70,16 @@ WCIC = function(obs, pred, level)
   sapply(names(pred), floop) %>% sum %>% return()
 }
 
-
-
 #### DATA IMPORT ####
 data(juraset)
 raw_db_co2 = read_csv('Real_Data_Study/Data/co2-data.csv')
 raw_db_weight = read_csv('Real_Data_Study/Data/db_gusto_weight.csv') 
 db_j = juraset %>%
-  mutate(ID = paste(Rock, Land)) %>% 
-  select(ID, X, Y, Zn)
+  pivot_longer(cols = Cd:Zn, names_to = 'ID', values_to = 'Output') %>% 
+  dplyr::select(ID, X, Y, Output)
 
-# plot_ly(x=db_jura$X, y=db_jura$Y, z=db_jura$Zn, 
-#         type="scatter3d", mode="markers", color=db_jura$ID)
+plot_ly(x=db_j$X, y=db_j$Y, z=db_j$Output,
+        type="scatter3d", mode="markers", color=db_j$ID)
 ####
 
 #### Weight study ####
@@ -98,40 +95,68 @@ db_w_train = db_w %>%
   filter(Training == 1)
 db_w_test = db_w %>%
   filter(Training == 0) %>%
-  split_times(prop_test = 0.3)
+  split_times(prop_test = 0.2)
 
 #mod_select = model_selection(db_w_train, k_grid = 2:10)
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_model_selection.rds')
 #mod_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_model_selection.rds')
 
+## Model selection indicates 4 clusters as optimal choice
 mod = mod_select$`K = 4`
 
-new_db = db_w_test %>% filter(ID == '010-04050') %>% 
-  filter(Observed == 1) %>% 
-  dplyr::select(-c(Training, Observed))
-new_db_t = db_w_test %>% filter(ID == '010-04050') %>% 
-  filter(Observed == 0) %>% 
-  dplyr::select(-c(Training, Observed))
-
-timestamps = seq(-1, 100, 0.1)
 m_k = list('K1' = 0, 'K2' = 0, 'K3' = 0, 'K4' = 0)
 list_mu = posterior_mu_k(db_w_train, timestamps, m_k, kernel, kernel, mod)
+
+floop = function(i, db_test)
+{ #browser()
+  print(i)
+  db_obs_i = db_test %>% filter(ID == i) %>% filter(Observed == 1)
+  db_pred_i = db_test %>% filter(ID == i) %>% filter(Observed == 0)
+  t_i_pred = db_pred_i %>% pull(Timestamp)
+  
+  new_hp = train_new_gp_EM(db_obs_i, list_mu, NULL,
+                           kernel, hp_i = mod)
+  pred_clust = pred_gp_clust(db_obs_i, timestamps = t_i_pred,
+                             list_mu, kernel, new_hp)
+  
+  eval_clust = tibble('ID' = i,
+                      'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
+                      'WCIC' = db_pred_i %>% WCIC(pred_clust, 0.05))
+
+  eval_clust %>% return()
+}
+db_res = db_w_test$ID %>% unique %>% lapply(floop, db_w_test) %>% bind_rows
+db_res %>% dplyr::select(-ID) %>% summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 
 new_hp = train_new_gp_EM(new_db, list_mu, NULL, kernel, hp_i = mod)
 
 pred = pred_gp_clust(new_db, timestamps, list_mu, kernel, new_hp)
 clust = paste0('K', pred_max_cluster(new_hp$tau_k))
 
-png("weight_plot_pred4.png",res=600, height=120, width= 220, units="mm")
-plot_gp_clust(pred, cluster = 'all', data = new_db,
-              data_train = db_w_test, mean_k = list_mu) +
-  geom_point(data = new_db_t, aes(x = Timestamp, y = Output), col = 'green')+ 
-  theme_classic() 
-dev.off()
+# png("weight_plot_pred4.png",res=600, height=120, width= 220, units="mm")
+# plot_gp_clust(pred, cluster = 'all', data = new_db,
+#               data_train = db_w_test, mean_k = list_mu) +
+#   geom_point(data = new_db_t, aes(x = Timestamp, y = Output), col = 'green')+ 
+#   theme_classic() 
+# dev.off()
+# 
+# png("weight_plot_pred_bestclust4.png",res=600, height=120, width= 220, units="mm")
+# plot_gp_clust(pred, cluster = clust, data = new_db,
+#               data_train = db_w_test, mean_k = list_mu) +
+#   geom_point(data = new_db_t, aes(x = Timestamp, y = Output), col = 'green')+ 
+#   theme_classic() 
+# dev.off()
 
-png("weight_plot_pred_bestclust4.png",res=600, height=120, width= 220, units="mm")
-plot_gp_clust(pred, cluster = clust, data = new_db,
-              data_train = db_w_test, mean_k = list_mu) +
-  geom_point(data = new_db_t, aes(x = Timestamp, y = Output), col = 'green')+ 
-  theme_classic() 
-dev.off()
+#### CO2 STUDY ####
+list_not_country = c('EU-28', 'Europe', 'Europe (excl. EU-27)', 'World',
+                     'North America', 'North America (excl. USA)', 'EU-27',
+                     'Europe (excl. EU-28)', 'Asia (excl. China & India)',
+                     'Asia', 'South America', 'Oceania', 'Africa',
+                     'Sint Maarten (Dutch part)')
+db_c = raw_db_co2 %>%
+  dplyr::select(country, year, co2_per_capita) %>% 
+  rename(ID = country, Timestamp = year, Output = co2_per_capita) %>%
+  filter(!(ID %in% list_not_country)) %>% 
+  drop_na()
+
+####
