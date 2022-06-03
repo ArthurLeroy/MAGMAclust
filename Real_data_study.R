@@ -14,19 +14,28 @@ split_train = function(db, ratio_train)
     return()
 }
 
-split_times = function(db, prop_test)
+split_times = function(db, prop_test, last = TRUE)
 { 
   db = db %>% rowid_to_column("Row")
-  row_obs = db %>%
-    group_by(ID) %>%
-    top_n(Input, n = - n() * (1 - prop_test)) %>%
-    pull(Row)
+  if(last){
+    row_obs = db %>%
+      group_by(ID) %>%
+      top_n(Input, n = - n() * (1 - prop_test)) %>%
+      pull(Row)
+  } else {
+    row_obs = db %>%
+      group_by(ID) %>%
+      sample_frac(1- prop_test) %>% 
+      pull(Row)
+  }
   
   db %>%
     ungroup() %>%
     mutate(Observed = ifelse(db$Row %in% row_obs, 1, 0)) %>%
-    dplyr::select(- Row) %>% return()
+    dplyr::select(- Row) %>%
+    return()
 }
+
 
 #### EVALUATION FUNCTIONS ####
 MSE_clust = function(obs, pred)
@@ -92,7 +101,7 @@ db_w_train = db_w %>%
   select(- Training)
 db_w_test = db_w %>%
   filter(Training == 0) %>%
-  split_times(prop_test = 0.2)
+  split_times(prop_test = 0.4)
 
 mod_select = select_nb_cluster(data = db_w_train, 
                                fast_approx = F,
@@ -100,35 +109,53 @@ mod_select = select_nb_cluster(data = db_w_train,
                                cv_threshold = 1e-2)
 #mod = train_magma(db_w_train)
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
-mod_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_2clusters.rds')
+#mod_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_2clusters.rds')
 
-## Model selection indicates 2 clusters as optimal choice
+## Model selection indicates 4 clusters as optimal choice
 
-floop = function(i, db_test)
-{ #browser()
+## Prediction loop function over individuals
+floop = function(i, db_test, mod_magma, mod_magmaclust)
+{ 
   print(i)
-  db_obs_i = db_w_test %>%
+  db_obs_i = db_test %>%
     filter(ID == i) %>%
     filter(Observed == 1) %>% 
     select(- c(Training, Observed))
-  db_pred_i = db_w_test %>%
+  db_pred_i = db_test %>%
     filter(ID == i) %>%
     filter(Observed == 0) %>% 
     select(- c(Training, Observed))
   input_i_pred = db_pred_i %>% pull(Input)
   
-  pred_clust = pred_magmaclust(db_obs_i, mod,
-                               grid_inputs = input_i_pred, plot = F)
+  ## Magma
+  pred = pred_magma(db_obs_i,
+                    mod_magma, 
+                    grid_inputs = input_i_pred,
+                    plot = F)
   
-  eval_clust = tibble('ID' = i,
+  eval = tibble('Method' = 'Magma',
+                'ID' = i,
+                'MSE' = db_pred_i %>%  MSE_clust(pred),
+                'WCIC' = db_pred_i %>% WCIC(pred, 0.05))
+  ## MagmaClust
+  pred_clust = pred_magmaclust(db_obs_i,
+                               mod_magmaclust,
+                               grid_inputs = input_i_pred,
+                               plot = F)
+  
+  
+  eval_clust = tibble('Method' = 'MagmaClust',
+                      'ID' = i,
                       'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
                       'WCIC' = db_pred_i %>% WCIC(pred_clust, 0.05))
 
-  eval_clust %>% return()
+  eval %>% 
+    bind_rows(eval_clust) %>%
+    return()
 }
 db_res = db_w_test$ID %>%
   unique %>% 
-  lapply(floop, db_w_test) %>%
+  lapply(floop, db_w_test, mod_select[[1]], mod_select[[3]]) %>%
   bind_rows
 
 db_res %>%
@@ -153,6 +180,14 @@ db_c = raw_db_co2 %>%
   dplyr::select(country, year, co2_per_capita) %>% 
   rename(ID = country, Input = year, Output = co2_per_capita) %>%
   filter(!(ID %in% list_not_country)) %>% 
-  drop_na()
+  drop_na() %>%
+  split_train(ratio_train = 0.6)
 
+## Splitting training and testing sets and select observed times
+db_c_train = db_c %>%
+  filter(Training == 1) %>% 
+  select(- Training)
+db_c_test = db_c %>%
+  filter(Training == 0) %>%
+  split_times(prop_test = 0.4)
 ####
