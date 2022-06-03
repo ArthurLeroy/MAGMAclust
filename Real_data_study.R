@@ -38,22 +38,29 @@ split_times = function(db, prop_test, last = TRUE)
 
 
 #### EVALUATION FUNCTIONS ####
+MSE = function(obs, pred)
+{
+  input = obs %>% pull(Input)
+  value = obs %>% pull(Output)
+  
+  mix_pred = pred %>%
+    filter(Input %in% input) %>%
+    pull(Mean)
+  
+  (value - mix_pred)^2 %>%
+    mean() %>%
+    return()
+}
+
 MSE_clust = function(obs, pred)
 {
   input = obs %>% pull(Input)
   value = obs %>% pull(Output)
-  floop = function(k)
-  {
-    pred_k = pred$pred[[k]] %>%
+  
+  mix_pred = pred$mixture_pred %>%
       filter(Input %in% input) %>%
       pull(Mean)
-    tau_k = pred$pred[[k]]$Proba %>% unique()
-    
-    (tau_k * pred_k)  %>%
-      return()
-  }
-  mix_pred = sapply(names(pred$pred), floop) %>% rowSums()
-  
+
   (value - mix_pred)^2 %>%
     mean() %>%
     return()
@@ -65,23 +72,103 @@ loss = function(x, y)
 }
 
 WCIC = function(obs, pred, level)
-{ 
+{
   t = obs %>% pull(Input)
   value = obs %>% pull(Output)
-  floop = function(k)
-  {
-    mean = pred$pred[[k]] %>% filter(Input %in% t) %>% pull(Mean)
-    sd = pred$pred[[k]] %>% filter(Input %in% t) %>% pull(Var) %>% sqrt
+
+  mean = pred %>% filter(Input %in% t) %>% pull(Mean)
+  sd = pred %>% filter(Input %in% t) %>% pull(Var) %>% sqrt
     
-    CI_inf = mean - qnorm(1 - level/2) * sd
-    CI_sup = mean + qnorm(1 - level/2) * sd
+  CI_inf = mean - qnorm(1 - level/2) * sd
+  CI_sup = mean + qnorm(1 - level/2) * sd
     
-    100 * pred$pred[[k]]$Proba[[1]] * ((CI_inf < value) & (value < CI_sup)) %>%
-      mean %>%
-      return()
-  }
-  sapply(names(pred$pred), floop) %>% sum %>% return()
+  100 * ((CI_inf < value) & (value < CI_sup)) %>%
+    mean %>%
+    return()
 }
+
+WCIC_clust = function(obs, pred, level)
+{
+  # t = obs %>% pull(Input)
+  # value = obs %>% pull(Output)
+  # 
+  # floop = function(k)
+  # { 
+  #   mean = pred$pred[[k]] %>% filter(Input %in% t) %>% pull(Mean)
+  #   sd = pred$pred[[k]] %>% filter(Input %in% t) %>% pull(Var) %>% sqrt
+  #   
+  #   CI_inf = mean - qnorm(1 - level/2) * sd
+  #   CI_sup = mean + qnorm(1 - level/2) * sd
+  #   
+  #   100 * pred$pred[[k]]$Proba[[1]] * ((CI_inf < value) & (value < CI_sup)) %>%
+  #     mean %>%
+  #     return()
+  # }
+  # sapply(names(pred$pred), floop) %>%
+  #   sum %>%
+  #   return()
+  t = obs %>% pull(Input)
+  value = obs %>% pull(Output)
+  
+  mean = pred$mixture_pred %>% filter(Input %in% t) %>% pull(Mean)
+  sd = pred$mixture_pred %>% filter(Input %in% t) %>% pull(Var) %>% sqrt
+  
+  CI_inf = mean - qnorm(1 - level/2) * sd
+  CI_sup = mean + qnorm(1 - level/2) * sd
+  
+  100 * ((CI_inf < value) & (value < CI_sup)) %>%
+    mean %>%
+    return()
+}
+
+## Prediction loop function over individuals
+eval = function(db_test, mod_magma, mod_magmaclust)
+{ 
+  floop = function(i){
+    print(i)
+    db_obs_i = db_test %>%
+      filter(ID == i) %>%
+      filter(Observed == 1) %>% 
+      select(- c(Training, Observed))
+    db_pred_i = db_test %>%
+      filter(ID == i) %>%
+      filter(Observed == 0) %>% 
+      select(- c(Training, Observed))
+    input_i_pred = db_pred_i %>% pull(Input)
+
+    ## Magma
+    pred = pred_magma(db_obs_i,
+                      mod_magma, 
+                      grid_inputs = input_i_pred,
+                      plot = F)
+  
+    eval = tibble('Method' = 'Magma',
+                  'ID' = i,
+                  'MSE' = db_pred_i %>% MSE(pred),
+                  'WCIC' = db_pred_i %>% WCIC(pred, 0.05))
+    ## MagmaClust
+    pred_clust = pred_magmaclust(db_obs_i,
+                                 mod_magmaclust,
+                                 grid_inputs = input_i_pred,
+                                 plot = F)
+  
+  
+    eval_clust = tibble('Method' = 'MagmaClust',
+                        'ID' = i,
+                        'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
+                        'WCIC' = db_pred_i %>% WCIC_clust(pred_clust, 0.05))
+  
+    eval %>% 
+      bind_rows(eval_clust) %>%
+      return()
+  } 
+  db_test$ID %>%
+    unique %>% 
+    lapply(floop) %>%
+    bind_rows %>% 
+    return()
+}
+
 
 #### DATA IMPORT ####
 raw_db_co2 = read_csv('Real_Data_Study/Data/co2-data.csv')
@@ -103,64 +190,24 @@ db_w_test = db_w %>%
   filter(Training == 0) %>%
   split_times(prop_test = 0.4)
 
-mod_select = select_nb_cluster(data = db_w_train, 
-                               fast_approx = F,
-                               grid_nb_cluster = 1:6, 
-                               cv_threshold = 1e-2)
-#mod = train_magma(db_w_train)
+# mod_select = select_nb_cluster(data = db_w_train, 
+#                                fast_approx = F,
+#                                grid_nb_cluster = 1:6, 
+#                                cv_threshold = 1e-2)
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
 #mod_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_2clusters.rds')
 
 ## Model selection indicates 4 clusters as optimal choice
+mod_magma = mod_select$trained_models[[1]]
+mod_magmaclust = mod_select$trained_models[[3]]
 
-## Prediction loop function over individuals
-floop = function(i, db_test, mod_magma, mod_magmaclust)
-{ 
-  print(i)
-  db_obs_i = db_test %>%
-    filter(ID == i) %>%
-    filter(Observed == 1) %>% 
-    select(- c(Training, Observed))
-  db_pred_i = db_test %>%
-    filter(ID == i) %>%
-    filter(Observed == 0) %>% 
-    select(- c(Training, Observed))
-  input_i_pred = db_pred_i %>% pull(Input)
-  
-  ## Magma
-  pred = pred_magma(db_obs_i,
-                    mod_magma, 
-                    grid_inputs = input_i_pred,
-                    plot = F)
-  
-  eval = tibble('Method' = 'Magma',
-                'ID' = i,
-                'MSE' = db_pred_i %>%  MSE_clust(pred),
-                'WCIC' = db_pred_i %>% WCIC(pred, 0.05))
-  ## MagmaClust
-  pred_clust = pred_magmaclust(db_obs_i,
-                               mod_magmaclust,
-                               grid_inputs = input_i_pred,
-                               plot = F)
-  
-  
-  eval_clust = tibble('Method' = 'MagmaClust',
-                      'ID' = i,
-                      'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
-                      'WCIC' = db_pred_i %>% WCIC(pred_clust, 0.05))
+db_res_w = eval(db_w_test, mod_magma, mod_magmaclust)
 
-  eval %>% 
-    bind_rows(eval_clust) %>%
-    return()
-}
-db_res = db_w_test$ID %>%
-  unique %>% 
-  lapply(floop, db_w_test, mod_select[[1]], mod_select[[3]]) %>%
-  bind_rows
-
-db_res %>%
+db_res_w %>%
   dplyr::select(-ID) %>%
+  group_by(Method) %>% 
   summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+
 
 # png("weight_plot_pred4.png",res=600, height=120, width= 220, units="mm")
 # plot_magmaclust(pred, cluster = 'all', data = new_db,
@@ -176,6 +223,7 @@ list_not_country = c('EU-28', 'Europe', 'Europe (excl. EU-27)', 'World',
                      'Europe (excl. EU-28)', 'Asia (excl. China & India)',
                      'Asia', 'South America', 'Oceania', 'Africa',
                      'Sint Maarten (Dutch part)')
+set.seed(42)
 db_c = raw_db_co2 %>%
   dplyr::select(country, year, co2_per_capita) %>% 
   rename(ID = country, Input = year, Output = co2_per_capita) %>%
@@ -190,4 +238,10 @@ db_c_train = db_c %>%
 db_c_test = db_c %>%
   filter(Training == 0) %>%
   split_times(prop_test = 0.4)
-####
+
+mod_select_c = select_nb_cluster(data = db_c_train,
+                               fast_approx = F,
+                               grid_nb_cluster = 1:6,
+                               cv_threshold = 1e-3)
+saveRDS(mod_select_c,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+
