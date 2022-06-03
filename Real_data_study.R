@@ -190,14 +190,15 @@ db_w_test = db_w %>%
   filter(Training == 0) %>%
   split_times(prop_test = 0.4)
 
+## Model selection and training
 # mod_select = select_nb_cluster(data = db_w_train, 
 #                                fast_approx = F,
 #                                grid_nb_cluster = 1:6, 
 #                                cv_threshold = 1e-2)
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
-#mod_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_2clusters.rds')
+#mod_select = readRDS('Real_Data_Study/Training/train_weight_mod_select.rds')
 
-## Model selection indicates 4 clusters as optimal choice
+## Model selection indicates 3 clusters as optimal choice
 mod_magma = mod_select$trained_models[[1]]
 mod_magmaclust = mod_select$trained_models[[3]]
 
@@ -239,9 +240,22 @@ db_c_test = db_c %>%
   filter(Training == 0) %>%
   split_times(prop_test = 0.4)
 
-mod_select_c = select_nb_cluster(data = db_c_train,
-                               fast_approx = F,
-                               grid_nb_cluster = 1:6,
-                               cv_threshold = 1e-3)
-saveRDS(mod_select_c,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+## Model selection and training
+# mod_select_c = select_nb_cluster(data = db_c_train,
+#                                fast_approx = F,
+#                                grid_nb_cluster = 1:6,
+#                                cv_threshold = 1e-3)
+# saveRDS(mod_select_c,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+#mod_select = readRDS('Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+
+## Model selection indicates 3 clusters as optimal choice
+mod_magma = mod_select$trained_models[[1]]
+mod_magmaclust = mod_select$trained_models[[3]]
+
+db_res_w = eval(db_w_test, mod_magma, mod_magmaclust)
+
+db_res_w %>%
+  dplyr::select(-ID) %>%
+  group_by(Method) %>% 
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 
