@@ -122,8 +122,13 @@ WCIC_clust = function(obs, pred, level)
 }
 
 ## Prediction loop function over individuals
-eval = function(db_test, mod_magma, mod_magmaclust)
+eval = function(db_test, mod_select)
 { 
+  ## Extract trained model for Magma
+  mod_magma = mod_select$trained_models[[1]]
+  ## Extract list of names for the remaining MagmaClust trained models
+  list_clust = mod_select$trained_models[-1]
+
   floop = function(i){
     print(i)
     db_obs_i = db_test %>%
@@ -147,16 +152,25 @@ eval = function(db_test, mod_magma, mod_magmaclust)
                   'MSE' = db_pred_i %>% MSE(pred),
                   'WCIC' = db_pred_i %>% WCIC(pred, 0.05))
     ## MagmaClust
-    pred_clust = pred_magmaclust(db_obs_i,
-                                 mod_magmaclust,
-                                 grid_inputs = input_i_pred,
-                                 plot = F)
-  
-  
-    eval_clust = tibble('Method' = 'MagmaClust',
-                        'ID' = i,
-                        'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
-                        'WCIC' = db_pred_i %>% WCIC_clust(pred_clust, 0.05))
+    floop_k = function(mod_magma_k){
+      
+      pred_clust = pred_magmaclust(db_obs_i,
+                                   mod_magma_k,
+                                   grid_inputs = input_i_pred,
+                                   plot = F)
+      
+      
+       tibble('Method' = paste0(
+         'MagmaClust - K = ', 
+          mod_magma_k$ini_args$nb_cluster),
+              'ID' = i,
+              'MSE' = db_pred_i %>%  MSE_clust(pred_clust),
+              'WCIC' = db_pred_i %>% WCIC_clust(pred_clust, 0.05))
+    }
+    eval_clust = list_clust %>% 
+      lapply(floop_k) %>% 
+      bind_rows() %>%
+      return()
   
     eval %>% 
       bind_rows(eval_clust) %>%
@@ -172,8 +186,8 @@ eval = function(db_test, mod_magma, mod_magmaclust)
 
 #### DATA IMPORT ####
 raw_db_co2 = read_csv('Real_Data_Study/Data/co2-data.csv')
-raw_db_weight = read_csv('Real_Data_Study/Data/db_gusto_weight.csv') 
-####
+raw_db_weight = read_csv('Real_Data_Study/Data/db_gusto_weight.csv')
+raw_db_swimming = read_csv('Real_Data_Study/Data/db_100m_freestyle.csv')
 
 #### WEIGHT STUDY ####
 set.seed(42)
@@ -196,13 +210,11 @@ db_w_test = db_w %>%
 #                                grid_nb_cluster = 1:6, 
 #                                cv_threshold = 1e-2)
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
-#mod_select = readRDS('Real_Data_Study/Training/train_weight_mod_select.rds')
+mod_w_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
 
 ## Model selection indicates 3 clusters as optimal choice
-mod_magma = mod_select$trained_models[[1]]
-mod_magmaclust = mod_select$trained_models[[3]]
 
-db_res_w = eval(db_w_test, mod_magma, mod_magmaclust)
+db_res_w = eval(db_w_test, mod_w_select)
 
 db_res_w %>%
   dplyr::select(-ID) %>%
@@ -241,21 +253,75 @@ db_c_test = db_c %>%
   split_times(prop_test = 0.4)
 
 ## Model selection and training
-# mod_select_c = select_nb_cluster(data = db_c_train,
+# mod_c_select = select_nb_cluster(data = db_c_train,
 #                                fast_approx = F,
 #                                grid_nb_cluster = 1:6,
 #                                cv_threshold = 1e-3)
-# saveRDS(mod_select_c,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
-#mod_select = readRDS('Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+# saveRDS(mod_c_select,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
+mod_c_select = readRDS('Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
 
-## Model selection indicates 3 clusters as optimal choice
-mod_magma = mod_select$trained_models[[1]]
-mod_magmaclust = mod_select$trained_models[[3]]
+db_res_c = eval(db_c_test, mod_c_select)
 
-db_res_w = eval(db_w_test, mod_magma, mod_magmaclust)
-
-db_res_w %>%
+db_res_c %>%
   dplyr::select(-ID) %>%
   group_by(Method) %>% 
   summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 
+#### SWIMMING STUDY ####
+set.seed(42)
+## Split by gender and draw the training/testing sets
+db_m = raw_db_swimming %>%
+  filter(Gender == 1) %>% 
+  rename(Input = Age, Output = Performance) %>% 
+  dplyr::select(- Gender) %>%
+  split_train(ratio_train = 0.6)
+
+db_f = raw_db_swimming %>%
+  filter(Gender == 2) %>% 
+  rename(Input = Age, Output = Performance) %>% 
+  dplyr::select(- Gender) %>%
+  split_train(ratio_train = 0.6)
+
+## Splitting training and testing sets and select observed times
+db_m_train = db_m %>%
+  filter(Training == 1) %>% 
+  select(- Training)
+db_m_test = db_m %>%
+  filter(Training == 0) %>%
+  split_times(prop_test = 0.4)
+
+db_f_train = db_f %>%
+  filter(Training == 1) %>% 
+  select(- Training)
+db_f_test = db_f %>%
+  filter(Training == 0) %>%
+  split_times(prop_test = 0.4)
+
+## Model selection and training
+# mod_m_select = select_nb_cluster(data = db_m_train,
+#                                 fast_approx = F,
+#                                 grid_nb_cluster = 1:6,
+#                                 cv_threshold = 1e-3)
+# saveRDS(mod_c_select,'Real_Data_Study/Training/train_men_Hoo_mod_select.rds')
+# mod_f_select = select_nb_cluster(data = db_f_train,
+#                                 fast_approx = F,
+#                                 grid_nb_cluster = 1:6,
+#                                 cv_threshold = 1e-3)
+# saveRDS(mod_c_select,'Real_Data_Study/Training/train_men_Hoo_mod_select.rds')
+
+mod_m_select = readRDS('Real_Data_Study/Training/train_male_Hoo_mod_select.rds')
+mod_f_select = readRDS('Real_Data_Study/Training/train_female_Hoo_mod_select.rds')
+
+db_res_m = eval(db_m_test, mod_m_select)
+
+db_res_m %>%
+  dplyr::select(-ID) %>%
+  group_by(Method) %>% 
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+
+db_res_f = eval(db_f_test, mod_f_select)
+
+db_res_f %>%
+  dplyr::select(-ID) %>%
+  group_by(Method) %>% 
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
