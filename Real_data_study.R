@@ -1,6 +1,12 @@
 library(tidyverse)
 library(png)
+library(reticulate)
 library(MagmaClustR)
+use_condaenv( "r-reticulate")
+np <- import("numpy", as = "np")
+mogp <- import("mogptk", as = "mogp")
+
+
 
 #### TRAIN/TEST SPLITING FUNCTIONS ####
 split_train = function(db, ratio_train)
@@ -212,14 +218,29 @@ db_w_test = db_w %>%
 #saveRDS(mod_select,'Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
 mod_w_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
 
-## Model selection indicates 3 clusters as optimal choice
+### MOGP
+db_w_train_py = mogp$LoadDataFrame(
+  db_w_train,
+  x_col='Input',
+  y_col='Output',
+  name= unique(db_w_train$ID))
+  
+  py$mogp.DataSet()
 
+## Evaluate the prediction performances
 db_res_w = eval(db_w_test, mod_w_select)
+# write_csv(db_res_w,'Real_Data_Study/Results/pred_weight_magma_magmaclust.csv')
 
+## Summarise the evaluation results
 db_res_w %>%
   dplyr::select(-ID) %>%
   group_by(Method) %>% 
-  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
+  mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
+         MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
+  mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
+         'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
+  dplyr::select(c(Method, Mean, WCIC))
 
 
 # png("weight_plot_pred4.png",res=600, height=120, width= 220, units="mm")
@@ -260,12 +281,21 @@ db_c_test = db_c %>%
 # saveRDS(mod_c_select,'Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
 mod_c_select = readRDS('Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
 
+## Evaluate the prediction performances
 db_res_c = eval(db_c_test, mod_c_select)
+# write_csv(db_res_c, 'Real_Data_Study/Results/pred_co2_magma_magmaclust.csv')
 
+## Summarise the evaluation results
 db_res_c %>%
   dplyr::select(-ID) %>%
   group_by(Method) %>% 
-  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
+  mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
+         MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
+  mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
+         'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
+  dplyr::select(c(Method, Mean, WCIC)) 
+
 
 #### SWIMMING STUDY ####
 set.seed(42)
@@ -312,16 +342,32 @@ db_f_test = db_f %>%
 mod_m_select = readRDS('Real_Data_Study/Training/train_male_Hoo_mod_select.rds')
 mod_f_select = readRDS('Real_Data_Study/Training/train_female_Hoo_mod_select.rds')
 
+## Evaluate the prediction performances
 db_res_m = eval(db_m_test, mod_m_select)
+# write_csv(db_res_m, 'Real_Data_Study/Results/pred_male_magma_magmaclust.csv')
 
+## Summarise the evaluation results
 db_res_m %>%
   dplyr::select(-ID) %>%
   group_by(Method) %>% 
-  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
+  mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
+         MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
+  mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
+         'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
+  dplyr::select(c(Method, Mean, WCIC)) 
 
+## Evaluate the prediction performances
 db_res_f = eval(db_f_test, mod_f_select)
+# write_csv(db_res_f, 'Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
 
+## Summarise the evaluation results
 db_res_f %>%
   dplyr::select(-ID) %>%
   group_by(Method) %>% 
-  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
+  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
+  mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
+         MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
+  mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
+         'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
+  dplyr::select(c(Method, Mean, WCIC)) 
