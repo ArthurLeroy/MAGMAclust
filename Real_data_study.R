@@ -302,12 +302,14 @@ set.seed(42)
 ## Split by gender and draw the training/testing sets
 db_m = raw_db_swimming %>%
   filter(Gender == 1) %>% 
+  mutate(ID = as.character(ID)) %>% 
   rename(Input = Age, Output = Performance) %>% 
   dplyr::select(- Gender) %>%
   split_train(ratio_train = 0.6)
 
 db_f = raw_db_swimming %>%
-  filter(Gender == 2) %>% 
+  filter(Gender == 2) %>%
+  mutate(ID = as.character(ID)) %>% 
   rename(Input = Age, Output = Performance) %>% 
   dplyr::select(- Gender) %>%
   split_train(ratio_train = 0.6)
@@ -332,12 +334,13 @@ db_f_test = db_f %>%
 #                                 fast_approx = F,
 #                                 grid_nb_cluster = 1:6,
 #                                 cv_threshold = 1e-3)
-# saveRDS(mod_c_select,'Real_Data_Study/Training/train_men_Hoo_mod_select.rds')
+# saveRDS(mod_m_select,'Real_Data_Study/Training/train_male_Hoo_mod_select.rds')
 # mod_f_select = select_nb_cluster(data = db_f_train,
+#                                 grid_inputs = unique(db_f$Input)
 #                                 fast_approx = F,
 #                                 grid_nb_cluster = 1:6,
 #                                 cv_threshold = 1e-3)
-# saveRDS(mod_c_select,'Real_Data_Study/Training/train_men_Hoo_mod_select.rds')
+# saveRDS(mod_f_select,'Real_Data_Study/Training/train_female_Hoo_mod_select.rds')
 
 mod_m_select = readRDS('Real_Data_Study/Training/train_male_Hoo_mod_select.rds')
 mod_f_select = readRDS('Real_Data_Study/Training/train_female_Hoo_mod_select.rds')
@@ -345,7 +348,12 @@ mod_f_select = readRDS('Real_Data_Study/Training/train_female_Hoo_mod_select.rds
 ## Evaluate the prediction performances
 db_res_m = eval(db_m_test, mod_m_select)
 # write_csv(db_res_m, 'Real_Data_Study/Results/pred_male_magma_magmaclust.csv')
+# db_res_m = read_csv('Real_Data_Study/Results/pred_male_magma_magmaclust.csv')
 
+## Evaluate the prediction performances
+db_res_f = eval(db_f_test, mod_f_select)
+# write_csv(db_res_f, 'Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
+ 
 ## Summarise the evaluation results
 db_res_m %>%
   dplyr::select(-ID) %>%
@@ -356,10 +364,6 @@ db_res_m %>%
   mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC)) 
-
-## Evaluate the prediction performances
-db_res_f = eval(db_f_test, mod_f_select)
-# write_csv(db_res_f, 'Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
 
 ## Summarise the evaluation results
 db_res_f %>%
