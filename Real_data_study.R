@@ -336,7 +336,7 @@ db_f_test = db_f %>%
 #                                 cv_threshold = 1e-3)
 # saveRDS(mod_m_select,'Real_Data_Study/Training/train_male_Hoo_mod_select.rds')
 # mod_f_select = select_nb_cluster(data = db_f_train,
-#                                 grid_inputs = unique(db_f$Input)
+#                                 grid_inputs = unique(db_f$Input),
 #                                 fast_approx = F,
 #                                 grid_nb_cluster = 1:6,
 #                                 cv_threshold = 1e-3)
@@ -352,8 +352,9 @@ db_res_m = eval(db_m_test, mod_m_select)
 
 ## Evaluate the prediction performances
 db_res_f = eval(db_f_test, mod_f_select)
-# write_csv(db_res_f, 'Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
- 
+ write_csv(db_res_f, 'Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
+#db_res_f = read_csv('Real_Data_Study/Results/pred_female_magma_magmaclust.csv')
+
 ## Summarise the evaluation results
 db_res_m %>%
   dplyr::select(-ID) %>%
