@@ -2,11 +2,10 @@ library(tidyverse)
 library(png)
 library(reticulate)
 library(MagmaClustR)
-use_condaenv( "r-reticulate")
-np <- import("numpy", as = "np")
-mogp <- import("mogptk", as = "mogp")
-
-
+use_condaenv("r-reticulate")
+np <- import("numpy")
+mogp <- import("mogptk")
+plt <- import('matplotlib.pyplot')
 
 #### TRAIN/TEST SPLITING FUNCTIONS ####
 split_train = function(db, ratio_train)
@@ -220,12 +219,18 @@ mod_w_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_mod_select.rds
 
 ### MOGP
 db_w_train_py = mogp$LoadDataFrame(
-  db_w_train,
-  x_col='Input',
-  y_col='Output',
-  name= unique(db_w_train$ID))
-  
-  py$mogp.DataSet()
+  db_w_train %>% slice(1:43) %>%
+    pivot_wider(names_from = ID, values_from = Output) %>% 
+    arrange(Input),
+  x_col= 'Input',
+  y_col= unique(db_w_train[1:43,]$ID))
+
+mod_mo = mogp$MOSM(db_w_train_py, model = mogp$Exact())
+mod_mo$train(method='LBFGS', verbose = TRUE);
+
+
+mod_mo$plot_prediction()
+plt$show()
 
 ## Evaluate the prediction performances
 db_res_w = eval(db_w_test, mod_w_select)
