@@ -1,11 +1,11 @@
 library(tidyverse)
 library(png)
-library(reticulate)
+# library(reticulate)
 library(MagmaClustR)
-use_condaenv("r-reticulate")
-np <- import("numpy")
-mogp <- import("mogptk")
-plt <- import('matplotlib.pyplot')
+# use_condaenv("r-reticulate")
+# np <- import("numpy")
+# mogp <- import("mogptk")
+# plt <- import('matplotlib.pyplot')
 
 #### TRAIN/TEST SPLITING FUNCTIONS ####
 split_train = function(db, ratio_train)
@@ -218,23 +218,25 @@ db_w_test = db_w %>%
 mod_w_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_mod_select.rds')
 
 ### MOGP
-db_w_train_py = mogp$LoadDataFrame(
-  db_w_train %>% slice(1:43) %>%
-    pivot_wider(names_from = ID, values_from = Output) %>% 
-    arrange(Input),
-  x_col= 'Input',
-  y_col= unique(db_w_train[1:43,]$ID))
-
-mod_mo = mogp$MOSM(db_w_train_py, model = mogp$Exact())
-mod_mo$train(method='LBFGS', verbose = TRUE);
-
-
-mod_mo$plot_prediction()
-plt$show()
+# db_w_train_py = mogp$LoadDataFrame(
+#   db_w_train %>% slice(1:43) %>%
+#     pivot_wider(names_from = ID, values_from = Output) %>% 
+#     arrange(Input),
+#   x_col= 'Input',
+#    y_col= unique(db_w_train[1:43,]$ID))
+# 
+# mod_mo = mogp$MOSM(db_w_train_py, model = mogp$Exact())
+# mod_mo$train(method='LBFGS', verbose = TRUE);
+# 
+# 
+# mod_mo$plot_prediction()
+# plt$show()
 
 ## Evaluate the prediction performances
-db_res_w = eval(db_w_test, mod_w_select)
+# db_res_w = eval(db_w_test, mod_w_select)
 # write_csv(db_res_w,'Real_Data_Study/Results/pred_weight_magma_magmaclust.csv')
+# db_res_w = read_csv('Real_Data_Study/Results/pred_weight_magma_magmaclust.csv')
+
 
 ## Summarise the evaluation results
 db_res_w %>%
@@ -247,14 +249,38 @@ db_res_w %>%
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC))
 
-
-# png("weight_plot_pred4.png",res=600, height=120, width= 220, units="mm")
-# plot_magmaclust(pred, cluster = 'all', data = new_db,
-#               data_train = db_w_test, mean_k = list_mu) +
-#   geom_point(data = new_db_t, aes(x = Input, y = Output), col = 'green')+ 
-#   theme_classic() 
-# dev.off()
+# ## Plot an example
+# id_w = '010-21288'
 # 
+# db_obs_w = db_w_test %>%
+#   filter(ID == id_w) %>%
+#   filter(Observed == 1) %>% 
+#   select(- c(Training, Observed))
+# db_pred_w = db_w_test %>%
+#   filter(ID == id_w) %>%
+#   filter(Observed == 0) %>% 
+#   select(- c(Training, Observed))
+# 
+# pred_ex_w = pred_magmaclust(
+#   db_obs_w,
+#   mod_w_select$trained_models[[3]],
+#   grid_inputs = seq(0, 72, 0.1), 
+#   hyperpost = hyp_w,
+#   get_hyperpost = FALSE)
+# 
+# # hyp_w = pred_ex_w$hyperpost
+# col_db_w = data_allocate_cluster(mod_w_select$trained_models[[3]])
+# 
+# png("pred_example_weigt_data_.png",res=600, height=120, width= 220, units="mm")
+# plot_magmaclust(pred_ex_w, cluster = 'all', data = db_obs_w,
+#                 data_train = col_db_w, col_clust = TRUE, size_data = 4,
+#                 heatmap = TRUE, y_grid = seq(5, 40, 0.2),
+#                 prior_mean = hyp_w$mean, size_data_train = 0.5) +
+#   geom_point(data = db_pred_w, aes(x = Input, y = Output),
+#              col = 'orange', size = 2) +
+#   theme_classic() + ggtitle("")
+# dev.off()
+ 
 
 #### CO2 STUDY ####
 list_not_country = c('EU-28', 'Europe', 'Europe (excl. EU-27)', 'World',
@@ -276,7 +302,7 @@ db_c_train = db_c %>%
   select(- Training)
 db_c_test = db_c %>%
   filter(Training == 0) %>%
-  split_times(prop_test = 0.4)
+  split_times(prop_test = 0.4, last = F)
 
 ## Model selection and training
 # mod_c_select = select_nb_cluster(data = db_c_train,
@@ -287,12 +313,14 @@ db_c_test = db_c %>%
 mod_c_select = readRDS('Real_Data_Study/Training/train_co2_Hoo_mod_select.rds')
 
 ## Evaluate the prediction performances
-db_res_c = eval(db_c_test, mod_c_select)
+# db_res_c = eval(db_c_test, mod_c_select)
 # write_csv(db_res_c, 'Real_Data_Study/Results/pred_co2_magma_magmaclust.csv')
+db_res_c = read_csv('Real_Data_Study/Results/pred_co2_magma_magmaclust.csv')
 
 ## Summarise the evaluation results
 db_res_c %>%
-  dplyr::select(-ID) %>%
+  filter(!(ID %in% c('Brunei', 'Curacao'))) %>%
+  dplyr::select(-ID)  %>% 
   group_by(Method) %>% 
   summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
   mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
@@ -300,7 +328,6 @@ db_res_c %>%
   mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC)) 
-
 
 #### SWIMMING STUDY ####
 set.seed(42)
@@ -381,3 +408,29 @@ db_res_f %>%
   mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC)) 
+
+
+#### Illustration example ####
+set.seed(42)
+db_illu = simu_db(M = 5, N = 30, K = 3, common_input = FALSE,
+                  int_i_sigma = c(3,3), int_mu_v = c(5,5))
+db_train_illu = db_illu %>% filter(ID != 'ID5-Clust3')
+db_pred_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% head(7)
+db_test_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% tail(23)
+
+#MagmaClustR:::plot_db(db_illu)
+
+mod_illu = train_magmaclust(db_train_illu)
+
+mod_illu$ini_args$common_hp_i = FALSE
+pred_illu = pred_magmaclust(db_pred_illu, mod_illu, get_hyperpost = TRUE,
+                            grid_inputs = seq(0,10, 0.1))
+  
+db_illu_clust = data_allocate_cluster(mod_illu)
+plot_magmaclust(pred_illu, data = db_pred_illu, data_train = db_illu_clust, 
+                col_clust = TRUE, size_data = 4, y_grid = seq(5, 40, 0.2),
+                size_data_train = 0.5, heatmap = TRUE,
+                prior_mean = pred_illu$hyperpost$mean) + 
+  geom_point(data = db_test_illu, aes(x = Input, y = Output),
+             col = 'orange', size = 2) + theme_classic() + ggtitle("")
+
