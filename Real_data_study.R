@@ -409,6 +409,71 @@ db_res_f %>%
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC)) 
 
+## Plot an example
+id_f = '296'
+
+db_obs_f = db_f_test %>%
+  filter(ID == id_f) %>%
+  filter(Observed == 1) %>%
+  select(- c(Training, Observed))
+db_pred_f = db_f_test %>%
+  filter(ID == id_f) %>%
+  filter(Observed == 0) %>%
+  select(- c(Training, Observed))
+
+pred_ex_f = pred_magmaclust(
+  db_obs_f,
+  mod_f_select$trained_models[[5]],
+  grid_inputs = seq(10, 20, 0.1),
+  hyperpost = hyp_f,
+  get_hyperpost = FALSE)
+
+#hyp_f = pred_ex_f$hyperpost
+col_db_f = data_allocate_cluster(mod_f_select$trained_models[[5]]) %>% 
+  slice(1:1000)
+
+png("pred_example_women_swimming_data_.png",res=600, height=120, width= 220, units="mm")
+plot_magmaclust(pred_ex_f, cluster = 'all', data = db_obs_f,
+                data_train = col_db_f, col_clust = TRUE, size_data = 4,
+                heatmap = TRUE, y_grid = seq(50, 110, 0.1),
+                prior_mean = hyp_f$mean, size_data_train = 0.5) +
+  geom_point(data = db_pred_f, aes(x = Input, y = Output),
+             col = 'yellow', size = 2) +
+  theme_classic() + ggtitle("")
+dev.off()
+
+## Plot an example
+id_m = "1164" #'778' 
+
+db_obs_m = db_m_test %>%
+  filter(ID == id_m) %>%
+  filter(Observed == 1) %>%
+  select(- c(Training, Observed))
+db_pred_m = db_m_test %>%
+  filter(ID == id_m) %>%
+  filter(Observed == 0) %>%
+  select(- c(Training, Observed))
+
+pred_ex_m = pred_magmaclust(
+  db_obs_m,
+  mod_m_select$trained_models[[5]],
+  grid_inputs = seq(10, 20, 0.01),
+  hyperpost = hyp_m,
+  get_hyperpost = FALSE, plot = F)
+
+#hyp_m = pred_ex_m$hyperpost
+col_db_m = data_allocate_cluster(mod_m_select$trained_models[[5]]) %>% 
+  slice(1:1000)
+
+png("pred_example_men_swimming_data_.png",res=600, height=120, width= 440, units="mm")
+plot_magmaclust(pred_ex_m, cluster = 'all', data = db_obs_m,
+                data_train = col_db_m, col_clust = TRUE, size_data = 4,
+                heatmap = TRUE, y_grid = seq(45, 110, 0.2),
+                prior_mean = hyp_m$mean, size_data_train = 0.5) +
+  geom_point(data = db_pred_m, aes(x = Input, y = Output),
+             col = 'yellow', size = 2) +
+  theme_classic() + ggtitle("")
+dev.off()
 
 #### Illustration example ####
 set.seed(42)
