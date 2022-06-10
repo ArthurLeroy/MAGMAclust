@@ -465,7 +465,7 @@ pred_ex_m = pred_magmaclust(
 col_db_m = data_allocate_cluster(mod_m_select$trained_models[[5]]) %>% 
   slice(1:1000)
 
-png("pred_example_men_swimming_data_.png",res=600, height=120, width= 440, units="mm")
+png("pred_example_men_swimming_data_.png",res=600, height=120, width= 220, units="mm")
 plot_magmaclust(pred_ex_m, cluster = 'all', data = db_obs_m,
                 data_train = col_db_m, col_clust = TRUE, size_data = 4,
                 heatmap = TRUE, y_grid = seq(45, 110, 0.2),
