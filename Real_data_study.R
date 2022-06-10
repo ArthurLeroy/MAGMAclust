@@ -432,7 +432,7 @@ pred_ex_f = pred_magmaclust(
 col_db_f = data_allocate_cluster(mod_f_select$trained_models[[5]]) %>% 
   slice(1:1000)
 
-png("pred_example_women_swimming_data_.png",res=600, height=120, width= 220, units="mm")
+png("pred_example_women_swimming_data.png",res=600, height=120, width= 220, units="mm")
 plot_magmaclust(pred_ex_f, cluster = 'all', data = db_obs_f,
                 data_train = col_db_f, col_clust = TRUE, size_data = 4,
                 heatmap = TRUE, y_grid = seq(50, 110, 0.1),
@@ -465,7 +465,7 @@ pred_ex_m = pred_magmaclust(
 col_db_m = data_allocate_cluster(mod_m_select$trained_models[[5]]) %>% 
   slice(1:1000)
 
-png("pred_example_men_swimming_data_.png",res=600, height=120, width= 220, units="mm")
+png("pred_example_men_swimming_data.png",res=600, height=120, width= 220, units="mm")
 plot_magmaclust(pred_ex_m, cluster = 'all', data = db_obs_m,
                 data_train = col_db_m, col_clust = TRUE, size_data = 4,
                 heatmap = TRUE, y_grid = seq(45, 110, 0.2),
@@ -480,8 +480,8 @@ set.seed(42)
 db_illu = simu_db(M = 5, N = 30, K = 3, common_input = FALSE,
                   int_i_sigma = c(3,3), int_mu_v = c(5,5))
 db_train_illu = db_illu %>% filter(ID != 'ID5-Clust3')
-db_pred_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% head(7)
-db_test_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% tail(23)
+db_pred_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% head(6)
+db_test_illu = db_illu %>% filter(ID == 'ID5-Clust3') %>% tail(24)
 
 #MagmaClustR:::plot_db(db_illu)
 
@@ -492,6 +492,7 @@ pred_illu = pred_magmaclust(db_pred_illu, mod_illu, get_hyperpost = TRUE,
                             grid_inputs = seq(0,10, 0.1))
   
 db_illu_clust = data_allocate_cluster(mod_illu)
+
 plot_magmaclust(pred_illu, data = db_pred_illu, data_train = db_illu_clust, 
                 col_clust = TRUE, size_data = 4, y_grid = seq(5, 40, 0.2),
                 size_data_train = 0.5, heatmap = TRUE,
@@ -499,3 +500,16 @@ plot_magmaclust(pred_illu, data = db_pred_illu, data_train = db_illu_clust,
   geom_point(data = db_test_illu, aes(x = Input, y = Output),
              col = 'orange', size = 2) + theme_classic() + ggtitle("")
 
+
+
+#### Motivation example ####
+db_motiv = db_m %>% 
+  filter(ID %in% unique(db_m$ID)[c(5, 14, 87, 73, 1011)])
+
+png("motivation_example.png",res=600, height=90, width= 270, units="mm")
+ggplot(db_motiv) +
+  geom_point(aes(x = Input, y = Output, col = ID)) +
+  theme_classic() + guides(col = 'none') + xlab('Age') + 
+  ylab('Performance (in sec)') + scale_x_continuous(breaks = 10:20) + 
+  scale_y_continuous(breaks = seq(50, 85, 5))
+dev.off()
