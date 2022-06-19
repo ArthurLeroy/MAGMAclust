@@ -249,22 +249,22 @@ db_res_w %>%
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC))
 
-# ## Plot an example
+## Plot an example
 # id_w = '010-21288'
 # 
 # db_obs_w = db_w_test %>%
 #   filter(ID == id_w) %>%
-#   filter(Observed == 1) %>% 
+#   filter(Observed == 1) %>%
 #   select(- c(Training, Observed))
 # db_pred_w = db_w_test %>%
 #   filter(ID == id_w) %>%
-#   filter(Observed == 0) %>% 
+#   filter(Observed == 0) %>%
 #   select(- c(Training, Observed))
 # 
 # pred_ex_w = pred_magmaclust(
 #   db_obs_w,
 #   mod_w_select$trained_models[[3]],
-#   grid_inputs = seq(0, 72, 0.1), 
+#   grid_inputs = seq(0, 72, 0.1),
 #   hyperpost = hyp_w,
 #   get_hyperpost = FALSE)
 # 
@@ -277,7 +277,7 @@ db_res_w %>%
 #                 heatmap = TRUE, y_grid = seq(5, 40, 0.2),
 #                 prior_mean = hyp_w$mean, size_data_train = 0.5) +
 #   geom_point(data = db_pred_w, aes(x = Input, y = Output),
-#              col = 'orange', size = 2) +
+#              col = 'yellow', size = 2) +
 #   theme_classic() + ggtitle("")
 # dev.off()
  
@@ -328,6 +328,13 @@ db_res_c %>%
   mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
   dplyr::select(c(Method, Mean, WCIC)) 
+
+## Plot an example
+png("pred_example_co2_data.png",res=600, height=120, width= 220, units="mm")
+ggplot(db_c %>% slice(1:1600)) +
+  geom_point(aes(x = Input, y = Output, col = ID), size = 0.6) +
+  theme_classic() + xlab('Year') + ylab('CO2 emission per capita')
+dev.off()
 
 #### SWIMMING STUDY ####
 set.seed(42)

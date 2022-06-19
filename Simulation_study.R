@@ -3,6 +3,7 @@ library(parallel)
 library(gridExtra)
 library(fda)
 library(funHDDC)
+library(funFEM)
 library(fossil)
 
 source('MAGMAclust.R')
@@ -106,6 +107,24 @@ clust_funHDDC = function(db, K)
     return()
 }
 
+clust_funFEM = function(db, K)
+{
+  basis = create.bspline.basis(c(0,10), nbasis=10)
+  timestamps = unique(db$Timestamp)
+  obs = db %>% dplyr::select(c(ID, Timestamp, Output)) %>% 
+    mutate(ID = as.numeric(ID)) %>% 
+    spread(key =  ID, value = Output) %>%
+    column_to_rownames('Timestamp') %>% 
+    as.matrix
+  fdata = smooth.basis(argvals = timestamps , y = obs, fdParobj = basis)$fd
+  clust = funFEM(fdata, K = K, model = "all", init = "kmeans")
+  
+  db %>% dplyr::select(ID, Cluster) %>% 
+    unique %>% 
+    mutate('Cluster_found' = clust$cls) %>% 
+    return()
+}
+
 ##### CLUST: SIMULATION FUNCTIONS #####
 simu_indiv = function(ID, t, mean, kern, clust, a, b, sigma)
 { # ID : identification of the individual
@@ -160,7 +179,8 @@ simu_scheme = function(M = 51, N = 30, K= 3, G = seq(0, 10, 0.05), pi = c(0.34,0
       k_b = draw(int_mu_b)
     }
     m_k = prior_mean(G)
-    simu_indiv(paste0('K',k), G, m_k, kern_i, paste0('K',k), k_a, k_b, sigma = 0) %>% return()
+    simu_indiv(paste0('K',k), G, m_k, kern_i, paste0('K',k), k_a, k_b, sigma = 0) %>%
+      return()
   }
   db_k = lapply(seq_len(K), floopk) %>% bind_rows %>% as_tibble
   
@@ -190,6 +210,45 @@ simu_scheme = function(M = 51, N = 30, K= 3, G = seq(0, 10, 0.05), pi = c(0.34,0
   return( list('db_i' = db_i, 'db_k' = db_k) )
 }
 
+
+simu_scheme_alternate = function(M = 51, N = 30, G = seq(0, 10, 0.05),
+                                int_a = c(0,5), int_b = c(5, 10)){
+  ## Draw location of the two modes for this dataset 
+  a = draw(int_a)
+  b = draw(int_b)
+  
+  u = runif(1,0,1)
+  ## Draw random input locations
+  t = sample(G, N, replace = F) %>% sort()
+  
+  floopi = function(i)
+  { 
+    ## This scheme is designed for 4 clusters but might be extended
+    k = sample(seq_len(4), size=1, prob = c(0.25, 0.25, 0.25, 0.25))
+    
+    ## Changing scheme for the different clusters
+    a_b = ifelse(k%%2 == 0, a, b)
+    v = ifelse(k>2, 0.5, 1)
+    
+    noise = rnorm(length(t), 0, 0.05)
+      
+    output = u + v * (1 - u) * pmax((a - abs(t - a_b)), 0) + noise
+    
+    db = tibble('ID' = as.character(i),
+                'Timestamp' = t,
+                'Output' = output,
+                'Cluster' = paste0('K', k) ,
+                'a' = a,
+                'b' = b,
+                'sigma' = 0.05) %>%
+      return()
+  }
+  db_i = lapply(seq_len(M), floopi) %>%
+    bind_rows %>%
+    as_tibble
+  
+  return( list('db_i' = db_i) )
+}
 ##### CLUST: EVALUATION FUNCTIONS #####
 
 MSE_clust = function(obs, pred)
@@ -512,13 +571,16 @@ loop_training_for_clust = function(db_loop, k, prior_mean, ini_hp_clust, kern_0,
     
     clust_kmeans = clust_kmeans(db_train, k)
     clust_funHDDC = tryCatch(clust_funHDDC(db_train, k), error = function(e){clust_kmeans})
+    clust_funFEM = tryCatch(clust_funFEM(db_train, k), error = function(e){clust_kmeans})
+    
     train = training_VEM(db_train, prior_mean_k, ini_hp_clust, kern_0, kern_i, ini_tau_i_k = NULL,
                          common_hp_k, common_hp_i)
     clust_magmaclust = db_train %>% dplyr::select(ID, Cluster) %>%
       unique %>%
       mutate('Cluster_found' = pred_max_cluster(train$param$tau_i_k))
+    
     list('MAGMAclust' = clust_magmaclust, 'funHDDC' = clust_funHDDC,
-         'k_means' = clust_kmeans) %>%
+         'funFEM' = clust_funFEM, 'k_means' = clust_kmeans) %>%
       return()
   }
   
@@ -738,44 +800,48 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 }
 
 # set.seed(42)
-# db_simu = datasets_multi(rep = 50, M = 101, K=3, N = 30, G = seq(0, 10, 0.05), common_times = T,
+# db_simu = datasets_multi(rep = 100, M = 20, K=3, N = 30, G = seq(0, 10, 0.05), common_times = T,
 #                common_hp_i = T, common_hp_k = T,  kern_0 = kernel_mu, kern_i = kernel, int_mu_a = c(0,3), int_mu_b = c(0,1),
-#                int_i_a = c(0,3), int_i_b = c(0,1), int_i_sigma = c(0,0.1), k_grid = 1:5)
-# db_simu %>%  write_csv('Simu_clust/Data/db_i_selec_50rep_M100_N30_time_Hoo.csv')
+#                int_i_a = c(0,3), int_i_b = c(0,1), int_i_sigma = c(0,0.1), k_grid = NULL)
+# db_simu %>%  write_csv('Simulations/Data/db_i_clust_100rep_M50_N30_time_alternate.csv')
 
 ##### CLUST: TABLES OF DATA ####
 
 # # Load the data and ensure IDs are filled as characters
-# table_Hoo = read_csv("Simu_clust/Data/db_i_clust_100rep_M50_N30_time_Hoo.csv")
+# table_Hoo = read_csv("Simulations/Data/db_i_clust_100rep_M50_N30_time_Hoo.csv")
 # table_Hoo$ID = as.character(table_Hoo$ID)
 # table_Hoo$ID_dataset = as.character(table_Hoo$ID_dataset)
 
-# table_Hoo_diff_t = read_csv("Simu_clust/Data/db_i_clust_100rep_M20_N30_diff_time_Hoo.csv")
+# table_Hoo_diff_t = read_csv("Simulations/Data/db_i_clust_100rep_M20_N30_diff_time_Hoo.csv")
 # table_Hoo_diff_t$ID = as.character(table_Hoo_diff_t$ID)
 # table_Hoo_diff_t$ID_dataset = as.character(table_Hoo_diff_t$ID_dataset)
 
-# table_Hoi = read_csv("Simu_clust/Data/db_i_clust_100rep_M50_N30_time_Hoi.csv")
+# table_Hoi = read_csv("Simulations/Data/db_i_clust_100rep_M50_N30_time_Hoi.csv")
 # table_Hoi$ID = as.character(table_Hoi$ID)
 # table_Hoi$ID_dataset = as.character(table_Hoi$ID_dataset)
 # 
-# table_Hko = read_csv("Simu_clust/Data/db_i_clust_100rep_M50_N30_time_Hko.csv")
+# table_Hko = read_csv("Simulations/Data/db_i_clust_100rep_M50_N30_time_Hko.csv")
 # table_Hko$ID = as.character(table_Hko$ID)
 # table_Hko$ID_dataset = as.character(table_Hko$ID_dataset)
 # 
 
-# table_Hki = read_csv("Simu_clust/Data/db_i_clust_100rep_M50_N30_time_Hki.csv")
+# table_Hki = read_csv("Simulations/Data/db_i_clust_100rep_M50_N30_time_Hki.csv")
 # table_Hki$ID = as.character(table_Hki$ID)
 # table_Hki$ID_dataset = as.character(table_Hki$ID_dataset)
 
-# table_Hoo_selec = read_csv("Simu_clust/Data/db_i_selec_50rep_M100_N30_time_Hoo.csv")
+# table_alternate = read_csv("Simulations/Data/db_i_clust_100rep_M50_N30_time_alternate.csv")
+# table_alternate$ID = as.character(table_alternate$ID)
+# table_alternate$ID_dataset = as.character(table_alternate$ID_dataset)
+
+# table_Hoo_selec = read_csv("Simulations/Data/db_i_selec_50rep_M100_N30_time_Hoo.csv")
 # table_Hoo_selec$ID = as.character(table_Hoo_selec$ID)
 # table_Hoo_selec$ID_dataset = as.character(table_Hoo_selec$ID_dataset)
 
 
 ##### CLUST: TRAIN ALL MODEL ####
 
-# db_to_train = table_Hoo_selec
-# t1 = Sys.time()
+db_to_train = table_alternate
+t1 = Sys.time()
 #train_loop = training_diff_k(db_to_train, kmax = 10, ini_hp =  list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
 #                             kern_0 = kernel_mu, kern_i = kernel, common_hp_k = T, common_hp_i = T)
 # train_loop = loop_training_for_BIC(db_to_train, k_grid = 1:6,
@@ -789,52 +855,52 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T, common_times = T)
 
-# train_loop = loop_training_for_clust(db_to_train, k = 3, prior_mean = 0,
-#                                     ini_hp_clust = list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
-#                                     kern_0 = kernel_mu, kern_i = kernel,
-#                                     common_hp_k = F, common_hp_i = F)
-# t2 = Sys.time()
-# train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
-# saveRDS(train_loop, 'Simu_clust/Training/train_for_selec_Hoo_M100.rds')
+train_loop = loop_training_for_clust(db_to_train %>% filter(ID_dataset %in% 1:2), k = 4, prior_mean = 0,
+                                    ini_hp_clust = list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
+                                    kern_0 = kernel_mu, kern_i = kernel,
+                                    common_hp_k = T, common_hp_i = T)
+t2 = Sys.time()
+train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
+saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 ##### CLUST: RESULTS : evaluation of clustering diff K ####
-# model_clust = readRDS('Simu_clust/Training/train_diffk_Hoo_M50.rds')
+# model_clust = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
 # res_clust = eval_clust_diffk(table_Hoo, model_clust, F)
-# write.csv(res_clust, "Simu_clust/Results/res_diffk_clust_M50.csv", row.names=FALSE)
+# write.csv(res_clust, "Simulations/Results/res_diffk_clust_M50.csv", row.names=FALSE)
 
-# model_pred = readRDS('Simu_clust/Training/train_diffk_Hoo_M50.rds')
+# model_pred = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
 # res_pred = loop_pred_diffk(table_Hoo, model_pred, nb_obs = 20, nb_test = 10, prior_mean = 0, kern_0 = kernel,
 #                            kern_i = kernel_mu, common_hp_k = T, common_hp_i = T)
-# write.csv(res_pred, "Simu_clust/Results/res_diffk_pred_M50.csv", row.names=FALSE)
+# write.csv(res_pred, "Simulations/Results/res_diffk_pred_M50.csv", row.names=FALSE)
 
-# res_pred = read_csv('Simu_clust/Results/res_diffk_pred_M50.csv')
+# res_pred = read_csv('Simulations/Results/res_diffk_pred_M50.csv')
 # res_pred %>% group_by(K) %>% summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 # ggplot(res_clust) + geom_boxplot(aes(x = as.factor(K), y = RI)) #+ scale_y_continuous(limits = c(0,100))
 
 
 ##### CLUST: RESULTS : evaluation of clustering vs alternatives ####
 
-# model_clust = readRDS('Simu_clust/Training/train_for_clust_Hki_M50.rds')
+# model_clust = readRDS('Simulations/Training/train_for_clust_Hki_M50.rds')
 # res_clust = eval_clust(model_clust, F)
-# write.csv(res_clust, "Simu_clust/Results/res_clust_Hki_M50.csv", row.names=FALSE)
+# write.csv(res_clust, "Simulations/Results/res_clust_Hki_M50.csv", row.names=FALSE)
 
-# res_clust = read_csv('Simu_clust/Results/res_diffk_pred.csv')
+# res_clust = read_csv('Simulations/Results/res_diffk_pred.csv')
 # res_clust %>% group_by(K) %>% summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 # ggplot(res_clust) + geom_boxplot(aes(x = as.factor(K), y = MSE)) #+ scale_y_continuous(limits = c(0,100))
 
 ##### CLUST: RESULTS : evaluation of pred vs alternatives ####
 
-# model_pred = readRDS('Simu_clust/Training/train_for_pred_Hoo_M50.rds')
+# model_pred = readRDS('Simulations/Training/train_for_pred_Hoo_M50.rds')
 # res_pred = loop_pred(table_Hoo, model_pred, nb_obs = 20, nb_test = 10)
-# write.csv(res_pred, "Simu_clust/Results/res_pred_Hoo_M50.csv", row.names=FALSE)
+# write.csv(res_pred, "Simulations/Results/res_pred_Hoo_M50.csv", row.names=FALSE)
 
-# res_pred = read_csv('Simu_clust/Results/res_pred_Hoo_M50.csv')
+# res_pred = read_csv('Simulations/Results/res_pred_Hoo_M50.csv')
 # res_pred %>% group_by(Method) %>% summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
 # ggplot(res_clust) + geom_boxplot(aes(x = as.factor(K), y = RI)) #+ scale_y_continuous(limits = c(0,100))
 
 
 ##### CLUST: RESULTS : evaluation of the model selection ####
-# model_selec = readRDS('Simu_clust/Training/train_for_selec_Hoo_M100.rds')
+# model_selec = readRDS('Simulations/Training/train_for_selec_Hoo_M100.rds')
 # new_BIC_simu = loop_recompute_BIC(table_Hoo_selec, model_selec, kernel, kernel)
 # new_BIC = new_BIC_simu %>% mutate(K = str_sub(K, start = 5, end = 5) %>% as.numeric)
 # max_new = new_BIC %>% group_by(Cluster_true, ID) %>% summarize(max = which.max(BIC))
@@ -846,8 +912,8 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 
 ### Boxplots changing values of K
 
-# res_clust =  read_csv('Simu_clust/Results/res_diffk_clust_M50.csv')
-# res_pred = read_csv('Simu_clust/Results/res_diffk_pred_M50.csv')
+# res_clust =  read_csv('Simulations/Results/res_diffk_clust_M50.csv')
+# res_pred = read_csv('Simulations/Results/res_diffk_pred_M50.csv')
 
 # res_clust_plot = res_clust %>% mutate(True_clust = ifelse(K == 3, 'Correct K','Incorrect K'))
 # plot1 = ggplot(res_clust_plot, aes(x = as.factor(K), y = RI, fill = True_clust)) +
@@ -864,10 +930,10 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 
 ### Boxplots comparison in RI vs alternatives
 
-# res_plot_Hoo =  read_csv('Simu_clust/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
-# res_plot_Hko =  read_csv('Simu_clust/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
-# res_plot_Hoi =  read_csv('Simu_clust/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
-# res_plot_Hki =  read_csv('Simu_clust/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
+# res_plot_Hoo =  read_csv('Simulations/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
+# res_plot_Hko =  read_csv('Simulations/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
+# res_plot_Hoi =  read_csv('Simulations/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
+# res_plot_Hki =  read_csv('Simulations/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
 # res_plot = res_plot_Hoo %>% bind_rows(res_plot_Hko, res_plot_Hoi, res_plot_Hki)
 # 
 # res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
@@ -878,7 +944,7 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 
 ### Tab prediction vs alternatives
 
-# res_plot = read_csv('Simu_clust/Results/res_pred_Hoo.csv')
+# res_plot = read_csv('Simulations/Results/res_pred_Hoo.csv')
 # 
 # res_plot %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd)) 
 # 
