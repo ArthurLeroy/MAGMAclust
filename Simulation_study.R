@@ -840,8 +840,8 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 
 ##### CLUST: TRAIN ALL MODEL ####
 
-db_to_train = table_alternate
-t1 = Sys.time()
+# db_to_train = table_alternate
+# t1 = Sys.time()
 #train_loop = training_diff_k(db_to_train, kmax = 10, ini_hp =  list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
 #                             kern_0 = kernel_mu, kern_i = kernel, common_hp_k = T, common_hp_i = T)
 # train_loop = loop_training_for_BIC(db_to_train, k_grid = 1:6,
@@ -855,13 +855,13 @@ t1 = Sys.time()
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T, common_times = T)
 
-train_loop = loop_training_for_clust(db_to_train %>% filter(ID_dataset %in% 1:2), k = 4, prior_mean = 0,
-                                    ini_hp_clust = list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
-                                    kern_0 = kernel_mu, kern_i = kernel,
-                                    common_hp_k = T, common_hp_i = T)
-t2 = Sys.time()
-train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
-saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
+# train_loop = loop_training_for_clust(db_to_train, k = 4, prior_mean = 0,
+#                                     ini_hp_clust = list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
+#                                     kern_0 = kernel_mu, kern_i = kernel,
+#                                     common_hp_k = T, common_hp_i = T)
+# t2 = Sys.time()
+# train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
+# saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 ##### CLUST: RESULTS : evaluation of clustering diff K ####
 # model_clust = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
