@@ -212,26 +212,26 @@ simu_scheme = function(M = 51, N = 30, K= 3, G = seq(0, 10, 0.05), pi = c(0.34,0
 }
 
 
-simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.05),
-                                int_a = c(1,4), int_b = c(6, 7.5)){
-  ## Draw location of the two modes for this dataset 
-  a = draw(int_a)
-  b = draw(int_b)
-  
+simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.1)){
+  ## Define location of the two modes for this dataset 
+  a = 2.5
+  b = 7.5
+  ## Draw a random mixing proportion
   u = runif(1,0,1)
-  ## Draw random input locations
-  t = sample(G, N, replace = F) %>% sort()
   
   floopi = function(i)
   { 
     ## This scheme is designed for 4 clusters but might be extended
     k = sample(seq_len(4), size=1, prob = c(0.25, 0.25, 0.25, 0.25))
+  
+    ## Draw random input locations
+    t = sample(G, N, replace = F) %>% sort()
     
     ## Changing scheme for the different clusters
     a_b = ifelse(k%%2 == 0, a, b)
     v = ifelse(k>2, 0.5, 1)
     
-    noise = rnorm(length(t), 0, 0.05)
+    noise = rnorm(length(t), 0, 0.01)
       
     output = u + v * (1 - u) * pmax((a - abs(t - a_b)), 0) + noise
     
@@ -250,6 +250,7 @@ simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.05),
   
   return( list('db_i' = db_i) )
 }
+
 ##### CLUST: EVALUATION FUNCTIONS #####
 
 MSE_clust = function(obs, pred)
@@ -581,28 +582,28 @@ loop_training_for_clust = function(db_loop, k, prior_mean, ini_hp_clust, kern_0,
     clust_funHDDC = tryCatch(clust_funHDDC(db_train, k), error = function(e){clust_kmeans})
     clust_funFEM = tryCatch(clust_funFEM(db_train, k), error = function(e){clust_kmeans})
    
-    train = training_VEM(db_train, prior_mean_k, ini_hp_clust, kern_0, kern_i, ini_tau_i_k = NULL,
-                         common_hp_k, common_hp_i)
-    clust_magmaclust = db_train %>% dplyr::select(ID, Cluster) %>%
-      unique %>%
-      mutate('Cluster_found' = pred_max_cluster(train$param$tau_i_k))
-    
-    # train = train_magmaclust(
-    #   db_train %>%
-    #     rename(Input = Timestamp) %>% 
-    #     select(- Cluster),
-    #   nb_cluster = k,
-    #   common_hp_k = common_hp_k,
-    #   common_hp_i = common_hp_i, cv_threshold = 0.01)
+    # train = training_VEM(db_train, prior_mean_k, ini_hp_clust, kern_0, kern_i, ini_tau_i_k = NULL,
+    #                      common_hp_k, common_hp_i)
+    # clust_magmaclust = db_train %>% dplyr::select(ID, Cluster) %>%
+    #   unique %>%
+    #   mutate('Cluster_found' = pred_max_cluster(train$param$tau_i_k))
+    #
+    train = train_magmaclust(
+      db_train %>%
+        rename(Input = Timestamp) %>%
+        select(- Cluster),
+      nb_cluster = k,
+      common_hp_k = common_hp_k,
+      common_hp_i = common_hp_i, cv_threshold = 0.01)
 
-    # clust_magmaclust = db_loop %>% filter(ID_dataset == i) %>%
-    #   filter(ID != 0) %>%
-    #   dplyr::select(ID, Cluster) %>% 
-    #   distinct(ID, Cluster) %>% 
-    #   left_join(
-    #     proba_max_cluster(train$hyperpost$mixture) %>%
-    #       rename(Cluster_found = Cluster)
-    #     )
+    clust_magmaclust = db_loop %>% filter(ID_dataset == i) %>%
+      filter(ID != 0) %>%
+      dplyr::select(ID, Cluster) %>%
+      distinct(ID, Cluster) %>%
+      left_join(
+        proba_max_cluster(train$hyperpost$mixture) %>%
+          rename(Cluster_found = Cluster)
+        )
 
     list('MAGMAclust' = clust_magmaclust, 'funHDDC' = clust_funHDDC,
          'funFEM' = clust_funFEM, 'k_means' = clust_kmeans) %>%
@@ -825,7 +826,7 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 }
 
 # set.seed(42)
-# db_simu = datasets_multi(rep = 100, M = 20, K=3, N = 30, G = seq(0, 10, 0.05), common_times = T,
+# db_simu = datasets_multi(rep = 100, M = 50, K=3, N = 30, G = seq(0, 10, 0.1), common_times = T,
 #                common_hp_i = T, common_hp_k = T,  kern_0 = kernel_mu, kern_i = kernel, int_mu_a = c(0,3), int_mu_b = c(0,1),
 #                int_i_a = c(0,3), int_i_b = c(0,1), int_i_sigma = c(0,0.1), k_grid = NULL)
 # db_simu %>%  write_csv('Simulations/Data/db_i_clust_100rep_M50_N30_time_alternate.csv')
@@ -909,7 +910,7 @@ saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 # write.csv(res_clust, "Simulations/Results/res_clust_Hki_M50.csv", row.names=FALSE)
 
 # res_clust = read_csv('Simulations/Results/res_diffk_pred.csv')
-ggplot(res_clust) + geom_boxplot(aes(x = Method, y = RI)) + scale_y_continuous(limits = c(0,1))
+# ggplot(res_clust) + geom_boxplot(aes(x = Method, y = RI)) + scale_y_continuous(limits = c(0,1))
 
 ##### CLUST: RESULTS : evaluation of pred vs alternatives ####
 
