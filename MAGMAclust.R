@@ -42,7 +42,7 @@ training_VEM = function(db, prior_mean_k,
   seq_logL = c()
   seq_ari = c()
   for(i in 1:n_loop_max)
-  { 
+  {
     print(i)
     ## E-Step
     param = e_step_VEM(db, prior_mean_k, kern_0, kern_i, hp, tau_i_k)  
@@ -80,7 +80,7 @@ training_VEM = function(db, prior_mean_k,
     #   pull(Cluster) %>% substr(2,2) %>% as.numeric()
     # seq_ari = c(seq_ari, rand.index(pred_clust, true_clust))
     ##
-    if(eps < 1e-1)
+    if(eps < 1e-2)
     {
       if(eps > 0){hp = new_hp}
       cv = TRUE
@@ -98,7 +98,7 @@ training_VEM = function(db, prior_mean_k,
     return()
 }
 
-model_selection = function(db, k_grid = 1:5, ini_hp = list('theta_k' = c(1, 1, 0.2), 'theta_i' = c(1, 1, 0.2)),
+model_selection = function(db, k_grid = 1:5, ini_hp = list('theta_k' = c(1, 1), 'theta_i' = c(1, 1, 0.2)),
                            kern_0 = kernel_mu, kern_i = kernel, ini_tau_i_k = NULL, common_hp_k = T, common_hp_i = T, 
                            plot = T)
 {
@@ -581,13 +581,16 @@ ini_kmeans = function(db, k, nstart = 50, summary = F)
   else{db_regular = db}
   
   res = db_regular %>% dplyr::select(c(ID, Timestamp, Output)) %>% 
-    spread(key =  Timestamp, value = Output) %>%
+    pivot_wider(names_from =  Timestamp, values_from = Output) %>%
     dplyr::select(-ID) %>% 
     kmeans(centers = k, nstart = nstart)
   
   if(summary){res %>% print}
-  
-  broom::augment(res, db_regular %>% spread(key =  Timestamp, value = Output)) %>%
+
+  broom::augment(
+    res,
+    db_regular %>% pivot_wider(names_from =  Timestamp, values_from = Output)
+    ) %>%
     dplyr::select(c(ID, .cluster)) %>% 
     rename(Cluster_ini = .cluster) %>% 
     mutate(Cluster_ini = paste0('K', .$Cluster_ini)) %>% 
@@ -597,12 +600,11 @@ ini_kmeans = function(db, k, nstart = 50, summary = F)
 ini_tau_i_k = function(db, k, nstart = 50)
 {
   ini_kmeans(db, k, nstart) %>% mutate(value = 1) %>%
-    spread(key = Cluster_ini, value = value, fill = 0) %>% 
+    pivot_wider(names_from = Cluster_ini, values_from = value, values_fill = 0) %>% 
     column_to_rownames(var = "ID") %>%
     apply(2, as.list) %>% 
     return()
 }
-
 
 ## TEST ####
 # k = seq_len(3)
