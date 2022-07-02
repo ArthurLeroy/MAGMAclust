@@ -75,7 +75,7 @@ clust_kmeans = function(db, K, nstart = 50, summary = F)
     column_to_rownames('Timestamp') %>% 
     as.matrix
   smoothed_db = smooth.basis(argvals = timestamps , y = obs, fdParobj = basis)$fd$coefs %>% t()
-  
+
   res = smoothed_db %>% kmeans(centers = K, nstart = nstart)
   
   if(summary){ res %>% print }
@@ -217,21 +217,21 @@ simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.1)){
   a = 2.5
   b = 7.5
   ## Draw a random mixing proportion
-  u = runif(1,0,1)
+  u = runif(1,0.05,0.95)
+  ## Draw random input locations
+  t = sample(G, N, replace = F) %>% sort()
+  
   
   floopi = function(i)
   { 
     ## This scheme is designed for 4 clusters but might be extended
     k = sample(seq_len(4), size=1, prob = c(0.25, 0.25, 0.25, 0.25))
   
-    ## Draw random input locations
-    t = sample(G, N, replace = F) %>% sort()
-    
     ## Changing scheme for the different clusters
     a_b = ifelse(k%%2 == 0, a, b)
     v = ifelse(k>2, 0.5, 1)
     
-    noise = rnorm(length(t), 0, 0.01)
+    noise = rnorm(length(t), 0, 0.05)
       
     output = u + v * (1 - u) * pmax((a - abs(t - a_b)), 0) + noise
     
@@ -359,6 +359,14 @@ eval_methods = function(db_results, test)
 
 eval_clust = function(train_clust, average = F)
 {
+  train_clust["prior_mean"] = NULL
+  train_clust["ini_hp_clust"] = NULL
+  train_clust["common_hp_k"] = NULL
+  train_clust["common_hp_i"] = NULL
+  train_clust["Time_train_tot"] = NULL
+  
+  list_ID = names(train_clust)
+  
   floop = function(i)
   {
     res_clust = train_clust[[i]]
@@ -374,7 +382,7 @@ eval_clust = function(train_clust, average = F)
     rbind(eval_kmeans, eval_funHDDC, eval_funFEM, eval_magmaclust) %>%
       return()
   }
-    list_eval = seq_len(100) %>% lapply(floop)
+    list_eval = list_ID %>% lapply(floop)
   
   if(average)
   {
@@ -572,29 +580,36 @@ loop_training_for_clust = function(db_loop, k, prior_mean, ini_hp_clust, kern_0,
       filter(!(ID %in% c(0))) %>%
       dplyr::select('ID', 'Timestamp', 'Output', 'Cluster')
     
-    prior_mean_k = rep(prior_mean, k) %>% setNames(paste0('K', seq_len(k))) %>%
-      as.list
-    
       # filter(ID != 0) %>%
       # dplyr::select(ID, Timestamp, Output, Cluster)
 
-    clust_kmeans = clust_kmeans(db_train, k)
-    clust_funHDDC = tryCatch(clust_funHDDC(db_train, k), error = function(e){clust_kmeans})
-    clust_funFEM = tryCatch(clust_funFEM(db_train, k), error = function(e){clust_kmeans})
-   
+    if_error = db_train %>% 
+      dplyr::select('ID', 'Cluster') %>% 
+      unique() %>% 
+      mutate(Cluster_found = 'K1')
+    
+    clust_kmeans = tryCatch(clust_kmeans(db_train, k), error = function(e){if_error})
+    clust_funHDDC = tryCatch(clust_funHDDC(db_train, k), error = function(e){if_error})
+    clust_funFEM = tryCatch(clust_funFEM(db_train, k), error = function(e){if_error})
+
+    # prior_mean_k = rep(prior_mean, k) %>% setNames(paste0('K', seq_len(k))) %>%
+    #   as.list
     # train = training_VEM(db_train, prior_mean_k, ini_hp_clust, kern_0, kern_i, ini_tau_i_k = NULL,
     #                      common_hp_k, common_hp_i)
     # clust_magmaclust = db_train %>% dplyr::select(ID, Cluster) %>%
     #   unique %>%
     #   mutate('Cluster_found' = pred_max_cluster(train$param$tau_i_k))
     #
+
     train = train_magmaclust(
       db_train %>%
         rename(Input = Timestamp) %>%
         select(- Cluster),
       nb_cluster = k,
       common_hp_k = common_hp_k,
-      common_hp_i = common_hp_i, cv_threshold = 0.01)
+      common_hp_i = common_hp_i, cv_threshold = 0.01,
+      ini_hp_k = ini_hp_clust$hp_k, 
+      ini_hp_i = ini_hp_clust$hp_i)
 
     clust_magmaclust = db_loop %>% filter(ID_dataset == i) %>%
       filter(ID != 0) %>%
@@ -880,10 +895,11 @@ t1 = Sys.time()
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T, common_times = T)
 
-train_loop = loop_training_for_clust(db_to_train %>% filter(ID_dataset %in% 1:4), k = 4, prior_mean = 0,
-                                    ini_hp_clust = list('theta_k' = c(1,1), 'theta_i' = c(1,1,0.2)),
+train_loop = loop_training_for_clust(db_to_train, k = 4, prior_mean = 0,
+                                    ini_hp_clust = list('theta_k' = c(2,1), 'theta_i' = c(0,1,-4)),
                                     kern_0 = kernel_mu, kern_i = kernel,
                                     common_hp_k = T, common_hp_i = T)
+
 t2 = Sys.time()
 train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
 saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
@@ -907,7 +923,7 @@ saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 # model_clust = readRDS('Simulations/Training/train_for_clust_alternate_M50.rds')
 # res_clust = eval_clust(model_clust, F)
-# write.csv(res_clust, "Simulations/Results/res_clust_Hki_M50.csv", row.names=FALSE)
+# write.csv(res_clust, "Simulations/Results/res_clust_alternate_M50.csv", row.names=FALSE)
 
 # res_clust = read_csv('Simulations/Results/res_diffk_pred.csv')
 # ggplot(res_clust) + geom_boxplot(aes(x = Method, y = RI)) + scale_y_continuous(limits = c(0,1))
@@ -954,17 +970,18 @@ saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 ### Boxplots comparison in RI vs alternatives
 
-# res_plot_Hoo =  read_csv('Simulations/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
-# res_plot_Hko =  read_csv('Simulations/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
-# res_plot_Hoi =  read_csv('Simulations/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
-# res_plot_Hki =  read_csv('Simulations/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
-# res_plot = res_plot_Hoo %>% bind_rows(res_plot_Hko, res_plot_Hoi, res_plot_Hki)
-# 
-# res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
-# 
-# png("RI_vs_alternatives.png",res=600, height=120, width= 176, units="mm")
-# ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method), outlier.shape = NA) + ylab('ARI') + theme_classic()
-# dev.off()
+res_plot_Hoo =  read_csv('Simulations/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
+res_plot_Hko =  read_csv('Simulations/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
+res_plot_Hoi =  read_csv('Simulations/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
+res_plot_Hki =  read_csv('Simulations/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
+res_plot_alt =  read_csv('Simulations/Results/res_clust_alternate_M50.csv') %>% mutate(Hypothesis = 'H1')
+res_plot = res_plot_Hoo %>% bind_rows(res_plot_Hko, res_plot_Hoi, res_plot_Hki, res_plot_alt)
+
+res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
+
+png("RI_vs_alternatives.png",res=600, height=120, width= 176, units="mm")
+ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method)) + ylab('ARI') + theme_classic()
+dev.off()
 
 ### Tab prediction vs alternatives
 
