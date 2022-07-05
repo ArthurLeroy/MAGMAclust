@@ -1,4 +1,3 @@
-library(GPFDA)
 library(parallel)
 library(gridExtra)
 library(fda)
@@ -6,59 +5,17 @@ library(funHDDC)
 library(funFEM)
 library(fossil)
 library(MagmaClustR)
+library(reticulate)
+use_condaenv("r-reticulate")
+np <- import("numpy")
+mogp <- import("mogptk")
+plt <- import('matplotlib.pyplot')
+
+### MOGP
 
 source('MAGMAclust.R')
 
 ##### CLUST: COMPETING ALGO IN SIMU ####
-train_gpfda = function(db)
-{
-  t1 = Sys.time()
-  db = db %>% dplyr::select(ID, Timestamp, Output)
-  M = db$ID %>% unique %>% length
-  t_obs = db$Timestamp %>% unique
-  N = t_obs %>% length
-  
-  lx = rep(1, M) %>% as.matrix
-  
-  fy1 = db %>% spread(key = ID, value = Output) %>% dplyr::select(- Timestamp ) %>% as.matrix %>% t()
-  fx1 = db$Timestamp %>% matrix(nrow = N, ncol = M) %>% t()
-  
-  model = gpfr(response=(fy1), lReg=lx, fReg=NULL, gpReg=list(fx1), fyList=list(nbasis=23,lambda=0.1), fbetaList_l=NULL,
-               hyper=NULL, Cov=c('pow.ex', 'linear'), fitting=T, time = t_obs, rPreIdx=T, concurrent=T) 
-  t2 = Sys.time()
-  model[['Time_train']] =  difftime(t2, t1, units = "secs")
-  
-  return(model)
-}
-
-pred_gpfda = function(model, new_db, timestamps)
-{
-  a1 = model
-  tfx = timestamps %>% as.matrix
-  time_new = timestamps
-  
-  pfy = new_db$Output
-  pfx = new_db$Timestamp %>% as.matrix
-  ptime = new_db$Timestamp
-  
-  b1<-gpfrpred(a1, TestData= tfx, NewTime=time_new, lReg = 1, fReg=NULL,
-               gpReg=list('response'=(pfy),'input'=(pfx),'time'= ptime))
-  
-  tibble('Timestamp' = b1$predtime, 'Mean' = as.vector(b1$ypred.mean), 'Var' = as.vector(b1$ypred.sd)^2) %>% return()
-}
-
-mean_gpfda =  function(model, timestamps)
-{
-  a1 = model
-  tfx = timestamps %>% as.matrix
-  time_new = timestamps
-  
-  b1<-gpfrpred(a1, TestData= tfx, NewTime=time_new, lReg = 1, fReg=NULL,
-               gpReg= NULL)
-  
-  tibble('Timestamp' = b1$predtime, 'Mean' = as.vector(b1$ypred.mean), 'Var' = as.vector(b1$ypred.sd)^2) %>% return()
-}  
-
 clust_kmeans = function(db, K, nstart = 50, summary = F)
 {
   ## db: tibble containing common Timestamps and associated Output values to cluster
@@ -123,6 +80,54 @@ clust_funFEM = function(db, K)
   db %>% dplyr::select(ID, Cluster) %>% 
     unique %>% 
     mutate('Cluster_found' = clust$cls) %>% 
+    return()
+}
+
+pred_MOGPTK = function(db, nb_obs, nb_test){
+  list_ID_dataset = db$ID_dataset %>% 
+    unique() %>%
+    as.character()
+  
+  floop = function(i){
+    paste0('Dataset n°', i)
+
+    db_i = db %>% dplyr::filter(ID_dataset == i) %>% 
+      dplyr::select(ID, Timestamp, Output) %>% 
+      rename(Input = Timestamp)
+    
+    db_py = mogp$LoadDataFrame(
+      db_i %>%
+        pivot_wider(names_from = ID, values_from = Output) %>%
+        arrange(Input),
+      x_col= 'Input',
+      y_col= unique(db_i$ID))
+    
+    test_inputs = db_i %>% dplyr::filter(ID == 1) %>% pull(Input)
+    
+    db_py[1]$remove_range(
+      start = test_inputs[nb_obs],
+      end = test_inputs[nb_obs + nb_test])
+    
+    t1 = Sys.time()
+browser()
+    mod_mo = mogp$SM_LMC(db_py, Q = as.integer(2))
+    mod_mo$train(method='LBFGS', iters = as.integer(2), verbose = TRUE);
+    
+    t2 = Sys.time()
+    
+    res = tibble::tibble(
+      'Timestamp' = as.vector(mod_mo$predict()[[1]][[1]]),
+      'Mean' = mod_mo$predict()[[2]][[1]],
+      'CI_inf' = mod_mo$predict()[[3]][[1]],
+      'CI_sup' = mod_mo$predict()[[4]][[1]]) 
+    
+    t3 = Sys.time()
+    
+    list('Pred' = res, 'Time_train' = t2 - t1, 'Time_pred' = t3 - t2) %>% 
+      return()
+  }
+  list_ID_dataset %>% 
+    sapply(floop, simplify = FALSE, USE.NAMES = TRUE) %>% 
     return()
 }
 
@@ -331,9 +336,6 @@ eval_methods = function(db_results, test)
   pred_one_gp = db_results$GP$Mean
   sd_one_gp = db_results$GP$Var %>% sqrt()
   
-  pred_gpfda = db_results$GPFDA$Mean
-  sd_gpfda = db_results$GPFDA$Var %>% sqrt()
-  
   db_test = test %>% pull(Output)
   
   eval_clust = tibble('MSE' = test %>%  MSE_clust(pred_clust),
@@ -347,13 +349,9 @@ eval_methods = function(db_results, test)
   eval_one_gp = tibble('MSE' = loss(pred_one_gp, db_test) %>% MSE(),
                        'WCIC' = ratio_IC(db_test, pred_one_gp - 1.96 * sd_one_gp, pred_one_gp + 1.96 * sd_one_gp),
                        'Time_train' = 0, 'Time_pred' = db_results$Time_pred_one_gp)
-  
-  eval_gpfda = tibble('MSE' = loss(pred_gpfda, db_test) %>% MSE(),
-                      'WCIC' = ratio_IC(db_test, pred_gpfda - 1.96 * sd_gpfda, pred_gpfda + 1.96 * sd_gpfda),
-                      'Time_train' = db_results$Time_train_gpfda, 'Time_pred' = db_results$Time_pred_gpfda)
-  
-  rbind(eval_one_gp, eval_gpfda, eval_algo, eval_clust) %>% 
-    mutate(Method = c('GP', 'GPFDA', 'MAGMA','MAGMAclust')) %>%
+
+  rbind(eval_one_gp, eval_algo, eval_clust) %>% 
+    mutate(Method = c('GP', 'MAGMA','MAGMAclust')) %>%
     return()
 }
 
@@ -550,12 +548,11 @@ loop_training_for_pred = function(db_loop, k, prior_mean, ini_hp_clust, ini_hp, 
       dplyr::select('ID', 'Timestamp', 'Output')
     prior_mean_k = rep(prior_mean, k) %>% setNames(paste0('K', seq_len(k))) %>% as.list
     
-    if(common_times){model_gpfda = train_gpfda(db_train)}else{model_gpfda = list('Time_train' = 0)}
     model_magma = training(db_train, prior_mean, ini_hp, kern_0, kern_i, common_hp_i)[c('hp', 'Time_train')]
     train = training_VEM(db_train, prior_mean_k, ini_hp_clust, kern_0, kern_i, ini_tau_i_k = NULL,
                          common_hp_k, common_hp_i)
     
-    list('GPFDA' = model_gpfda, 'MAGMA' = model_magma,
+    list('MAGMA' = model_magma, 
          'MAGMAclust' = list('hp'=train$hp, 'Time_train'=train$Time_train, 'tau_i_k'=train$param$tau_i_k) ) %>%
       return()
   }
@@ -564,6 +561,20 @@ loop_training_for_pred = function(db_loop, k, prior_mean, ini_hp_clust, ini_hp, 
   
   list_train %>% c(list('prior_mean' = prior_mean, 'ini_hp_clust' = ini_hp_clust, 'ini_hp' = ini_hp,
                         'common_times' = common_times, 'common_hp_k' = common_hp_k, 'common_hp_i' = common_hp_i)) %>% 
+    return()
+}
+
+add_new_model = function(old_models, new_model, name)
+{
+  ## Get the names of datasets
+  list_dataset = old_models[-c(101:107)] %>% names()
+  
+  for(i in list_dataset)
+  {
+    old_models[[i]][[name]] = new_model[[i]]
+  }
+  
+  old_models %>%
     return()
 }
 
@@ -653,7 +664,6 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
     ## Get the trained model for GPFDA and our algo
     model_algo = train_loop[[i]]$MAGMA
     list_hp = model_algo$hp
-    model_gpfda = train_loop[[i]]$GPFDA
     model_magmaclust = train_loop[[i]]$MAGMAclust
     list_hp_clust = model_magmaclust
     list_hp_clust[['param']] = list('tau_i_k' = model_magmaclust$tau_i_k)
@@ -678,23 +688,17 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
     ## Prediction for one GP model
     res_one_gp = pred_gp(db_obs_i, t_i_pred, prior_mean, cov_mu = NULL, kern_i, hp_one_gp$theta, hp_one_gp$sigma)
     t3 = Sys.time()
-    ## Prediction for GPFDA (unable for uncommon timestamps)
-    if(common_times){res_gpfda = pred_gpfda(model_gpfda, db_obs_i, t_i_pred)}
-    else{res_gpfda =  tibble('Timestamp' = t_i_pred, 'Mean' = NA ,   'Var' = NA)}
-    t4 = Sys.time()
     
     res_magmaclust = full_algo_clust(db_train_i, db_obs_i, t_i_pred, kern_i, tau_i_k, common_hp_k, common_hp_i, 
                                      prior_mean_k, kern_0, list_hp_clust, mu_k = NULL, ini_hp_clust, hp_new_i = NULL)$Prediction
-    t5 = Sys.time()
+    t4 = Sys.time()
     
     ### Get MSE, RATIO IC95 and computing times on testing points for all methods 
     list('MAGMA' = res_algo, 'Time_train_algo' = model_algo$Time_train, 
          'Time_pred_algo' = difftime(t2, t1, units = "secs"),
          'GP' = res_one_gp, 'Time_pred_one_gp' =  difftime(t3, t2, units = "secs"),
-         'GPFDA' = res_gpfda, 'Time_train_gpfda' = model_gpfda$Time_train,
-         'Time_pred_gpfda' =  difftime(t4, t3, units = "secs"),
          'MAGMAclust' = res_magmaclust, 'Time_train_magmaclust' = model_magmaclust$Time_train, 
-         'Time_pred_magmaclust' = difftime(t5, t4, units = "secs")) %>%
+         'Time_pred_magmaclust' = difftime(t4, t3, units = "secs")) %>%
       eval_methods(db_pred_i) %>%
       return()
   }
@@ -881,7 +885,7 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 ##### CLUST: TRAIN ALL MODEL ####
 
 db_to_train = table_alternate
-t1 = Sys.time()
+# t1 = Sys.time()
 #train_loop = training_diff_k(db_to_train, kmax = 10, ini_hp =  list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
 #                             kern_0 = kernel_mu, kern_i = kernel, common_hp_k = T, common_hp_i = T)
 # train_loop = loop_training_for_BIC(db_to_train, k_grid = 1:6,
@@ -894,15 +898,16 @@ t1 = Sys.time()
 #                                     ini_hp = list('theta_0' = c(1,1), 'theta_i' = c(1,1,0.2)),
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T, common_times = T)
+# 
+# train_loop = loop_training_for_clust(db_to_train, k = 4, prior_mean = 0,
+#                                     ini_hp_clust = list('theta_k' = c(2,1), 'theta_i' = c(0,1,-4)),
+#                                     kern_0 = kernel_mu, kern_i = kernel,
+#                                     common_hp_k = T, common_hp_i = T)
+train_SM_LMC = pred_MOGPTK(db_to_train %>% dplyr::filter(ID_dataset %in% 1:3), 20, 10)
 
-train_loop = loop_training_for_clust(db_to_train, k = 4, prior_mean = 0,
-                                    ini_hp_clust = list('theta_k' = c(2,1), 'theta_i' = c(0,1,-4)),
-                                    kern_0 = kernel_mu, kern_i = kernel,
-                                    common_hp_k = T, common_hp_i = T)
-
-t2 = Sys.time()
-train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
-saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
+# t2 = Sys.time()
+# train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
+# saveRDS(train_loop, 'Simulations/Training/train_for_pred_Hoo_M50.rds')
 
 ##### CLUST: RESULTS : evaluation of clustering diff K ####
 # model_clust = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
@@ -936,8 +941,7 @@ saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 # res_pred = read_csv('Simulations/Results/res_pred_Hoo_M50.csv')
 # res_pred %>% group_by(Method) %>% summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE)
-# ggplot(res_clust) + geom_boxplot(aes(x = Method, y = RI)) #+ scale_y_continuous(limits = c(0,100))
-
+# ggplot(res_pred) + geom_boxplot(aes(x = Method, y = MSE)) + scale_y_continuous(limits = c(0,100))
 
 ##### CLUST: RESULTS : evaluation of the model selection ####
 # model_selec = readRDS('Simulations/Training/train_for_selec_Hoo_M100.rds')
@@ -970,18 +974,18 @@ saveRDS(train_loop, 'Simulations/Training/train_for_clust_alternate_M50.rds')
 
 ### Boxplots comparison in RI vs alternatives
 
-res_plot_Hoo =  read_csv('Simulations/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
-res_plot_Hko =  read_csv('Simulations/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
-res_plot_Hoi =  read_csv('Simulations/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
-res_plot_Hki =  read_csv('Simulations/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
-res_plot_alt =  read_csv('Simulations/Results/res_clust_alternate_M50.csv') %>% mutate(Hypothesis = 'H1')
-res_plot = res_plot_Hoo %>% bind_rows(res_plot_Hko, res_plot_Hoi, res_plot_Hki, res_plot_alt)
-
-res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
-
-png("RI_vs_alternatives.png",res=600, height=120, width= 176, units="mm")
-ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method)) + ylab('ARI') + theme_classic()
-dev.off()
+# res_plot_Hoo =  read_csv('Simulations/Results/res_clust_Hoo_M50.csv') %>% mutate(Hypothesis = 'Hoo')
+# res_plot_Hko =  read_csv('Simulations/Results/res_clust_Hko_M50.csv') %>% mutate(Hypothesis = 'Hko')
+# res_plot_Hoi =  read_csv('Simulations/Results/res_clust_Hoi_M50.csv') %>% mutate(Hypothesis = 'Hoi')
+# res_plot_Hki =  read_csv('Simulations/Results/res_clust_Hki_M50.csv') %>% mutate(Hypothesis = 'Hki')
+# res_plot_alt =  read_csv('Simulations/Results/res_clust_alternate_M50.csv') %>% mutate(Hypothesis = 'Scheme_A')
+# res_plot = res_plot_Hoo %>% bind_rows(res_plot_Hko, res_plot_Hoi, res_plot_Hki, res_plot_alt)
+# 
+# res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
+# 
+# png("RI_vs_alternatives.png",res=600, height=120, width= 176, units="mm")
+# ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method), outlier.shape = NA ) + ylab('ARI') + theme_classic()
+# dev.off()
 
 ### Tab prediction vs alternatives
 
@@ -989,7 +993,7 @@ dev.off()
 # 
 # res_plot %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd)) 
 # 
-# ggplot(res_plot) + geom_boxplot(aes(x = Method, y = MSE))+ theme_classic() +coord_cartesian(ylim = c(0,160))
+# ggplot(res_plot) + geom_boxplot(aes(x = Method, y = MSE))+ theme_classic() + coord_cartesian(ylim = c(0,160))
 
 ##### TEST GPFDA ####
 # M = 20
