@@ -89,7 +89,7 @@ pred_MOGPTK = function(db, nb_obs, nb_test){
     as.character()
   
   floop = function(i){
-    paste0('Dataset n°', i)
+    paste0('Dataset n°', i) %>% print()
 
     db_i = db %>% dplyr::filter(ID_dataset == i) %>% 
       dplyr::select(ID, Timestamp, Output) %>% 
@@ -109,9 +109,9 @@ pred_MOGPTK = function(db, nb_obs, nb_test){
       end = test_inputs[nb_obs + nb_test])
     
     t1 = Sys.time()
-browser()
-    mod_mo = mogp$SM_LMC(db_py, Q = as.integer(2))
-    mod_mo$train(method='LBFGS', iters = as.integer(2), verbose = TRUE);
+
+    mod_mo = mogp$MOSM(db_py, Q = as.integer(2))
+    mod_mo$train(method='LBFGS', iters = as.integer(100), verbose = TRUE);
     
     t2 = Sys.time()
     
@@ -336,6 +336,10 @@ eval_methods = function(db_results, test)
   pred_one_gp = db_results$GP$Mean
   sd_one_gp = db_results$GP$Var %>% sqrt()
   
+  pred_sm_lmc = db_results$SM_LMC$Mean
+  ci_inf_sm_lmc = db_results$SM_LMC$CI_inf
+  ci_sup_sm_lmc = db_results$SM_LMC$CI_sup
+  
   db_test = test %>% pull(Output)
   
   eval_clust = tibble('MSE' = test %>%  MSE_clust(pred_clust),
@@ -350,8 +354,12 @@ eval_methods = function(db_results, test)
                        'WCIC' = ratio_IC(db_test, pred_one_gp - 1.96 * sd_one_gp, pred_one_gp + 1.96 * sd_one_gp),
                        'Time_train' = 0, 'Time_pred' = db_results$Time_pred_one_gp)
 
-  rbind(eval_one_gp, eval_algo, eval_clust) %>% 
-    mutate(Method = c('GP', 'MAGMA','MAGMAclust')) %>%
+  eval_sm_lmc = tibble('MSE' = loss(pred_sm_lmc, db_test) %>% MSE(),
+                       'WCIC' = ratio_IC(db_test, ci_inf_sm_lmc, ci_sup_sm_lmc),
+                       'Time_train' = db_results$Time_train_sm_lmc, 'Time_pred' = db_results$Time_pred_sm_lmc)
+  
+  rbind(eval_one_gp, eval_sm_lmc, eval_algo, eval_clust) %>% 
+    mutate(Method = c('GP', 'SM_LMC', 'MAGMA','MAGMAclust')) %>%
     return()
 }
 
@@ -571,7 +579,9 @@ add_new_model = function(old_models, new_model, name)
   
   for(i in list_dataset)
   {
-    old_models[[i]][[name]] = new_model[[i]]
+    if(i %in% names(new_model)){
+      old_models[[i]][[name]] = new_model[[i]]
+    }
   }
   
   old_models %>%
@@ -664,9 +674,12 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
     ## Get the trained model for GPFDA and our algo
     model_algo = train_loop[[i]]$MAGMA
     list_hp = model_algo$hp
+
     model_magmaclust = train_loop[[i]]$MAGMAclust
     list_hp_clust = model_magmaclust
     list_hp_clust[['param']] = list('tau_i_k' = model_magmaclust$tau_i_k)
+    
+    model_sm_lmc = train_loop[[i]]$SM_LMC
     
     ## Get the corresponding database
     db_i = db_loop %>% filter(ID_dataset == i)
@@ -677,7 +690,7 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
     db_pred_i = db_i %>% filter(ID == 1) %>% top_n(nb_test, Timestamp)
     ## Get timestamps to predict on
     t_i_pred = db_pred_i %>% pull(Timestamp)
-    
+
     t1 = Sys.time()
     ## Prediction for our algo (train new indiv + pred)
     res_algo = full_algo(db_train_i, db_obs_i, t_i_pred, kern_i, common_hp, plot = F, prior_mean, kern_0,
@@ -693,18 +706,23 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
                                      prior_mean_k, kern_0, list_hp_clust, mu_k = NULL, ini_hp_clust, hp_new_i = NULL)$Prediction
     t4 = Sys.time()
     
+    res_sm_lmc = model_sm_lmc$Pred %>% 
+      filter(Timestamp %in% t_i_pred) %>%
+      arrange(Timestamp)
+    
     ### Get MSE, RATIO IC95 and computing times on testing points for all methods 
     list('MAGMA' = res_algo, 'Time_train_algo' = model_algo$Time_train, 
-         'Time_pred_algo' = difftime(t2, t1, units = "secs"),
+         'Time_pred_algo' = difftime(t2, t1, units = "secs"), 'SM_LMC' = res_sm_lmc,
+         'Time_train_sm_lmc' = model_sm_lmc$Time_train * 60, 
+         'Time_pred_sm_lmc' = model_sm_lmc$Time_pred,
          'GP' = res_one_gp, 'Time_pred_one_gp' =  difftime(t3, t2, units = "secs"),
          'MAGMAclust' = res_magmaclust, 'Time_train_magmaclust' = model_magmaclust$Time_train, 
          'Time_pred_magmaclust' = difftime(t4, t3, units = "secs")) %>%
       eval_methods(db_pred_i) %>%
       return()
   }
-  
   list_eval = db_loop$ID_dataset %>% unique() %>% lapply(floop)
-  
+
   do.call('rbind', list_eval) %>% 
     mutate(Time_train = as.numeric(Time_train), Time_pred = as.numeric(Time_pred)) %>% 
     return()
@@ -884,7 +902,7 @@ datasets_multi = function(rep, M, N, K, G, common_times, common_hp_i, common_hp_
 
 ##### CLUST: TRAIN ALL MODEL ####
 
-db_to_train = table_alternate
+db_to_train = table_Hoo
 # t1 = Sys.time()
 #train_loop = training_diff_k(db_to_train, kmax = 10, ini_hp =  list('theta_k' = c(1,1,0.2), 'theta_i' = c(1,1,0.2)),
 #                             kern_0 = kernel_mu, kern_i = kernel, common_hp_k = T, common_hp_i = T)
@@ -903,11 +921,12 @@ db_to_train = table_alternate
 #                                     ini_hp_clust = list('theta_k' = c(2,1), 'theta_i' = c(0,1,-4)),
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T)
-train_SM_LMC = pred_MOGPTK(db_to_train %>% dplyr::filter(ID_dataset %in% 1:3), 20, 10)
-
+ train_MOSM = pred_MOGPTK(db_to_train %>% filter(ID_dataset %in% 1:2), 20, 10)
+ old_models = readRDS('Simulations/Training/train_for_pred_Hoo_M50_add_SM_LMC.rds')
+# train_loop = add_new_model(old_models, train_MOSM, 'MOSM')
 # t2 = Sys.time()
 # train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
-# saveRDS(train_loop, 'Simulations/Training/train_for_pred_Hoo_M50.rds')
+# saveRDS(train_loop, 'Simulations/Training/train_for_pred_Hoo_M50_add_SM_LMC.rds')
 
 ##### CLUST: RESULTS : evaluation of clustering diff K ####
 # model_clust = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
@@ -935,7 +954,7 @@ train_SM_LMC = pred_MOGPTK(db_to_train %>% dplyr::filter(ID_dataset %in% 1:3), 2
 
 ##### CLUST: RESULTS : evaluation of pred vs alternatives ####
 
-# model_pred = readRDS('Simulations/Training/train_for_pred_Hoo_M50.rds')
+# model_pred = readRDS('Simulations/Training/train_for_pred_Hoo_M50_add_SM_LMC.rds')
 # res_pred = loop_pred(table_Hoo, model_pred, nb_obs = 20, nb_test = 10)
 # write.csv(res_pred, "Simulations/Results/res_pred_Hoo_M50.csv", row.names=FALSE)
 
