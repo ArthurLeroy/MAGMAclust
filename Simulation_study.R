@@ -340,6 +340,10 @@ eval_methods = function(db_results, test)
   ci_inf_sm_lmc = db_results$SM_LMC$CI_inf
   ci_sup_sm_lmc = db_results$SM_LMC$CI_sup
   
+  pred_mosm = db_results$MOSM$Mean
+  ci_inf_mosm = db_results$MOSM$CI_inf
+  ci_sup_mosm = db_results$MOSM$CI_sup
+  
   db_test = test %>% pull(Output)
   
   eval_clust = tibble('MSE' = test %>%  MSE_clust(pred_clust),
@@ -358,8 +362,12 @@ eval_methods = function(db_results, test)
                        'WCIC' = ratio_IC(db_test, ci_inf_sm_lmc, ci_sup_sm_lmc),
                        'Time_train' = db_results$Time_train_sm_lmc, 'Time_pred' = db_results$Time_pred_sm_lmc)
   
-  rbind(eval_one_gp, eval_sm_lmc, eval_algo, eval_clust) %>% 
-    mutate(Method = c('GP', 'SM_LMC', 'MAGMA','MAGMAclust')) %>%
+  eval_mosm = tibble('MSE' = loss(pred_mosm, db_test) %>% MSE(),
+                       'WCIC' = ratio_IC(db_test, ci_inf_mosm, ci_sup_mosm),
+                       'Time_train' = db_results$Time_train_mosm, 'Time_pred' = db_results$Time_pred_mosm)
+  
+  rbind(eval_one_gp, eval_sm_lmc, eval_mosm, eval_algo, eval_clust) %>% 
+    mutate(Method = c('GP', 'SM_LMC', 'MOSM', 'MAGMA','MAGMAclust')) %>%
     return()
 }
 
@@ -680,6 +688,7 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
     list_hp_clust[['param']] = list('tau_i_k' = model_magmaclust$tau_i_k)
     
     model_sm_lmc = train_loop[[i]]$SM_LMC
+    model_mosm = train_loop[[i]]$MOSM
     
     ## Get the corresponding database
     db_i = db_loop %>% filter(ID_dataset == i)
@@ -710,11 +719,17 @@ loop_pred = function(db_loop, train_loop, nb_obs, nb_test, k = 3)
       filter(Timestamp %in% t_i_pred) %>%
       arrange(Timestamp)
     
+    res_mosm = model_mosm$Pred %>% 
+      filter(Timestamp %in% t_i_pred) %>%
+      arrange(Timestamp)
+    
     ### Get MSE, RATIO IC95 and computing times on testing points for all methods 
     list('MAGMA' = res_algo, 'Time_train_algo' = model_algo$Time_train, 
          'Time_pred_algo' = difftime(t2, t1, units = "secs"), 'SM_LMC' = res_sm_lmc,
          'Time_train_sm_lmc' = model_sm_lmc$Time_train * 60, 
-         'Time_pred_sm_lmc' = model_sm_lmc$Time_pred,
+         'Time_pred_sm_lmc' = model_sm_lmc$Time_pred, 'MOSM' = res_mosm,
+         'Time_train_mosm' = model_mosm$Time_train * 60, 
+         'Time_pred_mosm' = model_mosm$Time_pred,
          'GP' = res_one_gp, 'Time_pred_one_gp' =  difftime(t3, t2, units = "secs"),
          'MAGMAclust' = res_magmaclust, 'Time_train_magmaclust' = model_magmaclust$Time_train, 
          'Time_pred_magmaclust' = difftime(t4, t3, units = "secs")) %>%
@@ -921,12 +936,12 @@ db_to_train = table_Hoo
 #                                     ini_hp_clust = list('theta_k' = c(2,1), 'theta_i' = c(0,1,-4)),
 #                                     kern_0 = kernel_mu, kern_i = kernel,
 #                                     common_hp_k = T, common_hp_i = T)
- train_MOSM = pred_MOGPTK(db_to_train %>% filter(ID_dataset %in% 1:2), 20, 10)
- old_models = readRDS('Simulations/Training/train_for_pred_Hoo_M50_add_SM_LMC.rds')
-# train_loop = add_new_model(old_models, train_MOSM, 'MOSM')
+ train_MOSM = pred_MOGPTK(db_to_train %>% filter(ID_dataset %in% 51:100), 20, 10)
+# old_models = readRDS('Simulations/Training/train_for_pred_Hoo_M50_add_MOSM.rds')
+ train_loop = add_new_model(old_models, train_MOSM, 'MOSM')
 # t2 = Sys.time()
 # train_loop[['Time_train_tot']] = difftime(t2, t1, units = "mins")
-# saveRDS(train_loop, 'Simulations/Training/train_for_pred_Hoo_M50_add_SM_LMC.rds')
+ saveRDS(train_loop, 'Simulations/Training/train_for_pred_Hoo_M50_add_MOSM2.rds')
 
 ##### CLUST: RESULTS : evaluation of clustering diff K ####
 # model_clust = readRDS('Simulations/Training/train_diffk_Hoo_M50.rds')
