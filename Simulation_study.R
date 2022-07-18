@@ -6,10 +6,10 @@ library(funFEM)
 library(fossil)
 library(MagmaClustR)
 library(reticulate)
-use_condaenv("r-reticulate")
-np <- import("numpy")
-mogp <- import("mogptk")
-plt <- import('matplotlib.pyplot')
+# use_condaenv("r-reticulate")
+# np <- import("numpy")
+# mogp <- import("mogptk")
+# plt <- import('matplotlib.pyplot')
 
 ### MOGP
 
@@ -222,7 +222,7 @@ simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.1)){
   a = 2.5
   b = 7.5
   ## Draw a random mixing proportion
-  u = runif(1,0.05,0.95)
+  u = runif(1, 0, 1)
   ## Draw random input locations
   t = sample(G, N, replace = F) %>% sort()
   
@@ -236,7 +236,7 @@ simu_scheme_alternate = function(M = 50, N = 30, G = seq(0, 10, 0.1)){
     a_b = ifelse(k%%2 == 0, a, b)
     v = ifelse(k>2, 0.5, 1)
     
-    noise = rnorm(length(t), 0, 0.05)
+    noise = rnorm(length(t), 0, 0.5)
       
     output = u + v * (1 - u) * pmax((a - abs(t - a_b)), 0) + noise
     
@@ -1023,9 +1023,9 @@ db_to_train = table_Hoo
 
 ### Tab prediction vs alternatives
 
-# res_plot = read_csv('Simulations/Results/res_pred_Hoo.csv')
+# res_plot = read_csv('Simulations/Results/res_pred_Hoo_M50.csv')
 # 
-# res_plot %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd)) 
+# res_plot %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
 # 
 # ggplot(res_plot) + geom_boxplot(aes(x = Method, y = MSE))+ theme_classic() + coord_cartesian(ylim = c(0,160))
 
