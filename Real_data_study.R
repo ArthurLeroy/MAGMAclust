@@ -5,7 +5,7 @@ library(MagmaClustR)
 #### TRAIN/TEST SPLITING FUNCTIONS ####
 split_train = function(db, ratio_train)
 {
-  n_indiv = db$ID%>% unique()
+  n_indiv = db$ID %>% unique()
   n_index = (ratio_train * length(n_indiv)) %>% round()
   index_train = sample(n_indiv, n_index, replace = F)
   

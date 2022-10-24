@@ -1,7 +1,0 @@
-Method...1,Mean...2,WCIC...3,Method...4,Mean...5,WCIC...6
-Magma,4.9 (6.6),94.3 (14.2),Magma,3 (3.3),96.9 (9.3)
-MagmaClust - K = 2,4.5 (6.2),94.3 (14.1),MagmaClust - K = 2,2.8 (3.2),96.2 (10.1)
-MagmaClust - K = 3,4.3 (6),94.4 (14.1),MagmaClust - K = 3,2.8 (3.1),96.1 (10.4)
-MagmaClust - K = 4,4.2 (5.9),94.4 (14.1),MagmaClust - K = 4,2.8 (3),96.2 (10)
-MagmaClust - K = 5,4.2 (5.9),94.4 (14.1),MagmaClust - K = 5,2.7 (3),96.1 (10.1)
-MagmaClust - K = 6,4.1 (5.7),94.3 (14.1),MagmaClust - K = 6,2.8 (3),96.3 (9.8)
