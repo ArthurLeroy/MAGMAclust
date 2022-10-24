@@ -219,17 +219,17 @@ mod_w_select = readRDS('Real_Data_Study/Training/train_weight_Hoo_mod_select.rds
 
 
 ## Summarise the evaluation results
-db_res_w %>%
-  dplyr::select(-ID) %>%
-  group_by(Method) %>% 
-  summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
-  mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
-         MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
-  mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
-         'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
-  dplyr::select(c(Method, Mean, WCIC))
-
-## Plot an example
+# db_res_w %>%
+#   dplyr::select(-ID) %>%
+#   group_by(Method) %>% 
+#   summarise_all(list('Mean' = mean, 'SD' = sd), na.rm = TRUE) %>% 
+#   mutate(MSE_Mean = round(MSE_Mean, 1), WCIC_Mean = round(WCIC_Mean, 1),
+#          MSE_SD = round(MSE_SD, 1), WCIC_SD = round(WCIC_SD, 1)) %>% 
+#   mutate('Mean' = paste0(MSE_Mean, ' (', MSE_SD, ')'),
+#          'WCIC' =  paste0(WCIC_Mean, ' (', WCIC_SD, ')')) %>%
+#   dplyr::select(c(Method, Mean, WCIC))
+# 
+# ## Plot an example
 # id_w = '010-21288'
 # 
 # db_obs_w = db_w_test %>%
@@ -247,20 +247,24 @@ db_res_w %>%
 #   grid_inputs = seq(0, 72, 0.1),
 #   hyperpost = hyp_w,
 #   get_hyperpost = FALSE)
-# 
-# # hyp_w = pred_ex_w$hyperpost
+
+# hyp_w = pred_ex_w$hyperpost
 # col_db_w = data_allocate_cluster(mod_w_select$trained_models[[3]])
-# 
-# png("pred_example_weigt_data_.png",res=600, height=120, width= 220, units="mm")
-# plot_magmaclust(pred_ex_w, cluster = 'all', data = db_obs_w,
+
+# png("pred_example_weigt_data.png",res=600, height=120, width= 220, units="mm")
+# plot_magmaclust(pred_ex_w, cluster = 'all',
 #                 data_train = col_db_w, col_clust = TRUE, size_data = 4,
-#                 heatmap = TRUE, y_grid = seq(5, 40, 0.2),
+#                 heatmap = TRUE, y_grid = seq(0, 40, 0.2),
 #                 prior_mean = hyp_w$mean, size_data_train = 0.5) +
 #   geom_point(data = db_pred_w, aes(x = Input, y = Output),
 #              col = 'yellow', size = 2) +
-#   theme_classic() + ggtitle("")
+#   geom_point(data = db_obs_w, aes(x = Input, y = Output),
+#              col = 'black', size = 2) +
+#   theme_classic() + ggtitle("") +
+#   xlab('Age (in months)') +
+#   ylab('Weight (in kg)')
 # dev.off()
- 
+
 
 #### CO2 STUDY ####
 list_not_country = c('EU-28', 'Europe', 'Europe (excl. EU-27)', 'World',
