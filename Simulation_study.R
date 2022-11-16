@@ -6,6 +6,7 @@ library(funFEM)
 library(fossil)
 library(MagmaClustR)
 library(reticulate)
+library(tidyverse)
 # use_condaenv("r-reticulate")
 # np <- import("numpy")
 # mogp <- import("mogptk")
@@ -964,7 +965,7 @@ db_to_train = table_Hoo
 # res_clust = eval_clust(model_clust, F)
 # write.csv(res_clust, "Simulations/Results/res_clust_alternate_M50.csv", row.names=FALSE)
 
-# res_clust = read_csv('Simulations/Results/res_diffk_pred.csv')
+# res_clust = read_csv('Simulations/Results/res_clust_alternate_M50.csv')
 # ggplot(res_clust) + geom_boxplot(aes(x = Method, y = RI)) + scale_y_continuous(limits = c(0,1))
 
 ##### CLUST: RESULTS : evaluation of pred vs alternatives ####
@@ -992,7 +993,7 @@ db_to_train = table_Hoo
 
 # res_clust =  read_csv('Simulations/Results/res_diffk_clust_M50.csv')
 # res_pred = read_csv('Simulations/Results/res_diffk_pred_M50.csv')
-
+# 
 # res_clust_plot = res_clust %>% mutate(True_clust = ifelse(K == 3, 'Correct K','Incorrect K'))
 # plot1 = ggplot(res_clust_plot, aes(x = as.factor(K), y = RI, fill = True_clust)) +
 #         geom_boxplot(outlier.shape = NA) + xlab('K') + ylab('ARI') +
@@ -1002,7 +1003,7 @@ db_to_train = table_Hoo
 # plot2 = ggplot(res_pred) + geom_boxplot(aes(x = as.factor(K), y = MSE)) + xlab('K') + theme_classic() +
 #   scale_x_discrete(labels=c('3'= parse(text = TeX('$\\mathbf{3^*}$'))))
 
-# png("diff_K.png",res=600, height=120, width= 176, units="mm")
+# png("diff_K.png",res=600, height=100, width= 200, units="mm")
 # plot1
 # dev.off()
 
@@ -1017,8 +1018,8 @@ db_to_train = table_Hoo
 # 
 # res_plot %>% dplyr::select(-Hypothesis) %>% group_by(Method) %>% summarize_all(list(Mean = mean, SD = sd), na.rm = T)
 # 
-# png("RI_vs_alternatives.png",res=600, height=120, width= 176, units="mm")
-# ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method), outlier.shape = NA ) + ylab('ARI') + theme_classic()
+# png("RI_vs_alternatives.png",res=600, height=100, width= 200, units="mm")
+# ggplot(res_plot) + geom_boxplot(aes(x = Hypothesis, y = RI, fill = Method) ) + ylab('ARI') + theme_classic()
 # dev.off()
 
 ### Tab prediction vs alternatives
@@ -1070,18 +1071,15 @@ plot_db(db_i, cluster= T)
 db_obs = db_i %>% filter(ID == 1) %>% head(14)
 db_test = db_i %>% filter(ID == 1) %>% tail(16)
 
-### Simple situation and comparison with GP and MAGMA
+## GP
+pred_one = MagmaClustR::pred_gp(data = db_obs, 
+                                grid_inputs = seq(0,11.5, 0.01), 
+                                mean = mean(db_obs$Output))
+ex_gp = MagmaClustR::plot_gp(pred_one, data = db_obs) + 
+  geom_point(data = db_test, aes(Input, Output), color ='red') + 
+  theme_classic()
 
 ## Magma
-# pred = full_algo(db_i, db_obs[1:14,], seq(0,11.5, 0.01), kernel, common_hp = T, plot = F, prior_mean = 0,
-#                  kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp, hp_new_i = NULL)
-# 
-# ex_magma = plot_gp(pred$Prediction, data = db_obs[1:14,], data_train = NULL, mean = pred$Mean_process$pred_GP, mean_CI = F) +
-#   geom_point(data = db_i, aes(Timestamp, Output, color = ID),  size = 0.5, alpha = 0.5) +
-#   guides(color = FALSE) + geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red') +
-#   theme_classic()
-# scale_y_continuous(limits = c(- 20, 32))
-
 train_magma = MagmaClustR::train_magma(data = db_i)
 pred_magma = MagmaClustR::pred_magma(data = db_obs, 
                                      trained_model = train_magma,
@@ -1094,59 +1092,65 @@ ex_magma = MagmaClustR::plot_gp(pred_magma,
                                 prior_mean = pred_magma$hyperpost$mean,
                                 size_data_train = 0.3
                                 ) + 
-  geom_point(data = db_test, aes(Input, Output), color ='red') + 
-  theme_classic()
+  geom_point(data = db_test, aes(Input, Output), color ='red')
 
-## GP
-# hp_one = train_new_gp(db_obs[1:14,], mean(db_obs[1:14,]$Output), 0, ini_hp$theta_i, kernel)
-# pred_one = pred_gp(db_obs[1:14,], timestamps = seq(0,11.5, 0.01), 
-#                    mean_mu = mean(db_obs[1:14,]$Output), cov_mu = NULL,
-#                    kern = kernel, theta = c(4,1), sigma = hp_one$sigma)
-# ex_gp = plot_gp(pred_one, data = db_obs[1:14,]) + 
-#   geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red') + 
-#   theme_classic()
-
-pred_one = MagmaClustR::pred_gp(data = db_obs, 
-                                grid_inputs = seq(0,11.5, 0.01), 
-                                mean = mean(db_obs$Output))
-ex_gp = MagmaClustR::plot_gp(pred_one, data = db_obs) + 
-  geom_point(data = db_test, aes(Input, Output), color ='red') + 
-  theme_classic()
 
 ## MagmaClust
-
 train_magmaclust = MagmaClustR::train_magmaclust(data = db_i, nb_cluster = 3)
 pred_magmaclust = MagmaClustR::pred_magmaclust(data = db_obs, 
-                                     trained_model = train_magma,
+                                     trained_model = train_magmaclust,
                                      grid_inputs = seq(0,11.5, 0.01), 
                                      get_hyperpost = TRUE)
 
-ex_magma = MagmaClustR::plot_gp(pred_magma, 
+db_i_col = MagmaClustR::data_allocate_cluster(train_magmaclust)
+
+ex_magmaclust = MagmaClustR::plot_magmaclust(pred_magmaclust, 
                                 data = db_obs,
-                                data_train = db_i,
+                                data_train = db_i_col,
+                                col_clust = TRUE,
                                 prior_mean = pred_magmaclust$hyperpost$mean,
-                                size_data_train = 0.3
+                                size_data_train = 0.3,
+                                alpha_data_train = 0.4
 ) + 
-  geom_point(data = db_test, aes(Input, Output), color ='red') + 
-  theme_classic()
-# k = 1:3 
-# ini_hp_test = list('theta_k' = c(2, 0.5, 0.2), 'theta_i' = c(1, 1, 0.2))
-# 
-# tau_i_k = replicate(length(k), rep(1,length(unique(db_i$ID[-1])))) %>%
-#   apply(1,function(x) x / sum(x)) %>%
-#   `rownames<-`(paste0('K', k)) %>%
-#   `colnames<-`(unique(db_i$ID[-1])) %>%
-#   apply(1, as.list)
-# 
-# pred_clust = full_algo_clust(db_i, db_obs[1:14,], seq(0,11.5, 0.01), kernel, tau_i_k,
-#                              common_hp_k = T, common_hp_i = T, prior_mean = list('K1' = 10, 'K2' = 20, 'K3' = 30),
-#                              kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp_test, hp_new_i = NULL)
-# 
-# ex_clust_all = plot_gp_clust(pred_clust$Prediction, cluster= 'all', data = db_obs[1:14,],
-#                              mean = pred_clust$Mean_processes, col_clust = T) +
-#   geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
-#   guides(color = FALSE) + geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red')+
-#   theme_classic()
+  geom_point(data = db_test, aes(Input, Output), color ='red') +
+  geom_point(data = db_obs, aes(Input, Output), color ='black') +
+  theme(legend.position = c(0.9, 0.9))
+
+
+png("illu_compare.png",res=600, height=240, width= 180, units="mm")
+grid.arrange(ex_gp, ex_magma, ex_magmaclust, ncol = 1, nrow = 3)
+dev.off()
+
+## Two other clusters
+ex_magmaclust_2 = MagmaClustR::plot_magmaclust(pred_magmaclust, 
+                                             cluster = 'K2',
+                                             data = db_obs,
+                                             data_train = db_i_col,
+                                             col_clust = TRUE,
+                                             prior_mean = pred_magmaclust$hyperpost$mean,
+                                             size_data_train = 0.3,
+                                             alpha_data_train = 0.4
+) + 
+  geom_point(data = db_test, aes(Input, Output), color ='red') +
+  geom_point(data = db_obs, aes(Input, Output), color ='black') +
+  theme(legend.position = c(0.9, 0.9))
+
+ex_magmaclust_3 = MagmaClustR::plot_magmaclust(pred_magmaclust, 
+                                               cluster = 'K3',
+                                               data = db_obs,
+                                               data_train = db_i_col,
+                                               col_clust = TRUE,
+                                               prior_mean = pred_magmaclust$hyperpost$mean,
+                                               size_data_train = 0.3,
+                                               alpha_data_train = 0.4
+) + 
+  geom_point(data = db_test, aes(Input, Output), color ='red') +
+  geom_point(data = db_obs, aes(Input, Output), color ='black') +
+  theme(legend.position = c(0.9, 0.9))
+
+png("illu_2_other_clusters.png",res=600, height=120, width= 352, units="mm")
+grid.arrange(ex_magmaclust_2, ex_magmaclust_3, ncol = 2, nrow = 1)
+dev.off()
 
 ## Graph of the increasing log-Likelihood
 db_logL = tibble('logL' = pred_clust$logL_iterations,
@@ -1165,39 +1169,78 @@ png("logL.png",res=600, height=120, width= 352, units="mm")
 dev.off()
 ##
 
-#  png("illu_2_other_clusters.png",res=600, height=120, width= 352, units="mm")
-# # grid.arrange(ex_gp, ex_magma, ex_clust, nrow = 3)
-#   grid.arrange(ex_clust1, ex_clust2, ncol = 2)
-#  dev.off()
-
 ###  Fuzzy situation and heatmap 
-pred_clust_2 = full_algo_clust(db_i %>% filter(ID != 1), db_obs[1:14,], seq(0,11.5, 0.01), kernel, tau_i_k,
-                               common_hp_k = T, common_hp_i = T, prior_mean = list('K1' = 20 , 'K2' = 30, 'K3' = 60),
-                               kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp_test, hp_new_i = NULL)
+set.seed(7)
+both_db_f = simu_scheme(common_times = F)
+db_i_f = both_db_f$db_i %>% 
+  select(ID, Timestamp, Output) %>% 
+  rename(Input = Timestamp)
+plot_db(db_i_f, cluster= T)
+db_obs_f = db_i_f %>% filter(ID == 44) %>% head(14)
+db_test_f = db_i_f %>% filter(ID == 44) %>% tail(16)
+
+train_magmaclust_f = MagmaClustR::train_magmaclust(data = db_i_f, nb_cluster = 3)
+pred_magmaclust_f = MagmaClustR::pred_magmaclust(data = db_obs_f, 
+                                               trained_model = train_magmaclust_f,
+                                               grid_inputs = seq(0,11.5, 0.01), 
+                                               get_hyperpost = TRUE)
+
+db_i_col_f = MagmaClustR::data_allocate_cluster(train_magmaclust_f)
+
+mixture = MagmaClustR::plot_magmaclust(pred_magmaclust_f, 
+                                             data = db_obs_f,
+                                             data_train = db_i_col_f,
+                                             col_clust = TRUE,
+                                             prior_mean = pred_magmaclust_f$hyperpost$mean,
+                                             size_data_train = 0.3
+) + 
+  geom_point(data = db_test_f, aes(Input, Output), color ='red') +
+  theme(legend.position = c(0.9, 0.9))
+
+heatmap = MagmaClustR::plot_magmaclust(pred_magmaclust_f, 
+                                       data = db_obs_f,
+                                       data_train = db_i_col_f,
+                                       col_clust = TRUE,
+                                       heatmap = TRUE,
+                                       prior_mean = pred_magmaclust_f$hyperpost$mean,
+                                       size_data_train = 0.3
+) + 
+  geom_point(data = db_test, aes(Input, Output), color ='yellow') +
+  theme(legend.position = c(0.9, 0.9))
 
 
-heat_plot = plot_heat_clust(pred_clust, data = db_obs[1:14,], mean = T,
-                            ygrid = seq(-10, 40, 0.1),  col_clust = T, interactive = F) +
-  geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
-  guides(color = FALSE) + geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red')+
-  theme_classic() + theme(legend.position=c(0.1,0.2))
-
-png("illu_heatmap.png",res=600, height=120, width= 352, units="mm")
-# grid.arrange(ex_gp, ex_magma, ex_clust, nrow = 3)
-grid.arrange(ex_clust_all, heat_plot, ncol = 2)
+png("illu_heatmap_fuzzy.png",res=600, height=120, width= 352, units="mm")
+grid.arrange(mixture, heatmap, ncol = 2, nrow = 1)
 dev.off()
 
-### Evaluate clustering
-
-gg2 = ggplot()
-for(k in names(pred_clust_2$Prediction))
-{
-  gg2 = gg2+geom_line(data = pred_clust_2$Mean_processes$mean[[k]], aes(x = Timestamp, y = Output), linetype = 'dashed')
-}  
-gg2 = gg2 +geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
-  guides(color = FALSE) +
-  theme_classic() + geom_line(data = db_k, aes(Timestamp, Output, color = Cluster))
-
-png("shape_cluster.png",res=600, height=120, width= 352, units="mm")
-grid.arrange(gg, gg2, ncol = 2)
-dev.off()
+# 
+# pred_clust_2 = full_algo_clust(db_i %>% filter(ID != 1), db_obs[1:14,], seq(0,11.5, 0.01), kernel, tau_i_k,
+#                                common_hp_k = T, common_hp_i = T, prior_mean = list('K1' = 20 , 'K2' = 30, 'K3' = 60),
+#                                kernel_mu, list_hp = NULL , mu = NULL, ini_hp = ini_hp_test, hp_new_i = NULL)
+# 
+# 
+# heat_plot = plot_heat_clust(pred_clust, data = db_obs[1:14,], mean = T,
+#                             ygrid = seq(-10, 40, 0.1),  col_clust = T, interactive = F) +
+#   geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
+#   guides(color = FALSE) + geom_point(data = db_obs[15:30,], aes(Timestamp, Output), color ='red')+
+#   theme_classic() + theme(legend.position=c(0.1,0.2))
+# 
+# png("illu_heatmap.png",res=600, height=120, width= 352, units="mm")
+# # grid.arrange(ex_gp, ex_magma, ex_clust, nrow = 3)
+# grid.arrange(ex_clust_all, heat_plot, ncol = 2)
+# dev.off()
+# 
+# ### Evaluate clustering
+# 
+# gg2 = ggplot()
+# for(k in names(pred_clust_2$Prediction))
+# {
+#   gg2 = gg2+geom_line(data = pred_clust_2$Mean_processes$mean[[k]], aes(x = Timestamp, y = Output), linetype = 'dashed')
+# }  
+# gg2 = gg2 +geom_point(data = db_i, aes(Timestamp, Output, color = Cluster), size = 0.5, alpha = 0.5) +
+#   guides(color = FALSE) +
+#   theme_classic() + geom_line(data = db_k, aes(Timestamp, Output, color = Cluster))
+# 
+# png("shape_cluster.png",res=600, height=120, width= 352, units="mm")
+# grid.arrange(gg, gg2, ncol = 2)
+# dev.off()
