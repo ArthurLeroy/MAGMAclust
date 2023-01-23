@@ -1,4 +1,4 @@
-This repository contains the R code of the algorithm MAGMAclust, presented in the paper 'Cluster-Specific Predictions with Multi-Task Gaussian Processes' by Leroy, Latouche, Guedj and Gey (https://arxiv.org/abs/2011.07866). If you are considering citing this work, you are welcome to use the file `reference.bib`.
+This repository contains the R code of the algorithm MAGMAclust, presented in the paper 'Cluster-Specific Predictions with Multi-Task Gaussian Processes' by Leroy, Latouche, Guedj and Gey (https://jmlr.org/papers/v24/20-1321.html). If you are considering citing this work, you are welcome to use the file `reference.bib`.
 
 The folder 'Simulations' contains the synthetic datasets, used for the experimental study in the paper, as well as the corresponding trained models and tables of results.
 
