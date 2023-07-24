@@ -504,3 +504,63 @@ ggplot(db_motiv) +
   ylab('Performance (in sec)') + scale_x_continuous(breaks = 10:20) + 
   scale_y_continuous(breaks = seq(50, 85, 5))
 dev.off()
+
+#### New graphs for presentations ####
+
+## Kernel illustration
+library(gganimate)
+
+input = seq(0, 10, 0.05)
+size = length(input)
+nb_samples = 3
+
+# kern = kern_to_cov(input, kern = 'PERIO', hp = tibble(
+#   se_variance = 1,
+#   se_lengthscale = 1)) 
+# kern = kern_to_cov(input, kern = 'PERIO', hp = tibble(
+#   perio_variance = 1,
+#   perio_lengthscale = 1,
+#   period= 0.5) )
+kern = kern_to_cov(input, kern = 'LIN', hp = tibble(
+  lin_slope = 1,
+  lin_offset = 0) )
+  
+        
+samples = c() 
+for(i in 1:10){
+samples <- samples %>% 
+  bind_rows(
+    tibble(
+  "ID" = rep(1:nb_samples, size) %>%  as.factor(),
+  "Input" = rep(input, each = nb_samples),
+  "Output" = mvtnorm::rmvnorm(nb_samples, rep(0, size), kern) %>% as.vector) %>%
+    mutate(Index = i)
+    )
+}
+ 
+gg_anim = ggplot(samples) + geom_line(aes(x = Input, y = Output, col = ID)) + 
+  guides(col = 'none') +
+  theme_classic() + transition_states(Index)
+
+animate(gg_anim, height = 1600, width = 2000, res = 300)
+
+anim_save("illu_lin_kernel.gif")
+
+## Illustration 2-D GIF
+
+db = simu_db(covariate = T)
+mod = train_magma(db)
+pred_gif = pred_gif(db %>% filter(ID == 1), mod)
+
+plot_gif = plot_gif(pred_gif, data = (db %>% filter(ID == 1)) ) 
+animate(plot_gif, height = 1200, width = 2000, res = 300)
+
+anim_save("illu_magma_2D.gif")
+
+## Illustration GP and Magma GIF
+set.seed(3)
+db = simu_db(common_input = F)
+db_i = db %>% filter(ID == 1)
+#MagmaClustR:::plot_db(db)
+
+pred_gp = pred_gp(db)
