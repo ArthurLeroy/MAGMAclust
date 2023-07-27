@@ -511,40 +511,90 @@ dev.off()
 library(gganimate)
 
 input = seq(0, 10, 0.05)
-size = length(input)
-nb_samples = 3
 
-# kern = kern_to_cov(input, kern = 'PERIO', hp = tibble(
-#   se_variance = 1,
-#   se_lengthscale = 1)) 
+kern = kern_to_cov(input, kern = 'SE', hp = tibble(
+  se_variance = 1,
+  se_lengthscale = 1))
 # kern = kern_to_cov(input, kern = 'PERIO', hp = tibble(
 #   perio_variance = 1,
 #   perio_lengthscale = 1,
 #   period= 0.5) )
-kern = kern_to_cov(input, kern = 'LIN', hp = tibble(
-  lin_slope = 1,
-  lin_offset = 0) )
+# kern = kern_to_cov(input, kern = 'LIN', hp = tibble(
+#   lin_slope = 1,
+#   lin_offset = 0) )
   
-        
-samples = c() 
-for(i in 1:10){
-samples <- samples %>% 
-  bind_rows(
-    tibble(
-  "ID" = rep(1:nb_samples, size) %>%  as.factor(),
-  "Input" = rep(input, each = nb_samples),
-  "Output" = mvtnorm::rmvnorm(nb_samples, rep(0, size), kern) %>% as.vector) %>%
-    mutate(Index = i)
-    )
+draw_samples = function(input = seq(0, 10, 0.05),
+                        mean = NULL, 
+                        nb_samples = 5,
+                        kern){
+  
+  size = length(input)
+  
+  floop = function(i){
+    if(mean %>% is.null()){
+      mean = rep(0, size)
+    }
+    
+      tibble(
+    "ID" = rep(1:nb_samples, size) %>%  as.factor(),
+    "Input" = rep(input, each = nb_samples),
+    "Output" = mvtnorm::rmvnorm(nb_samples, mean, kern)%>%as.vector,
+    "Index" = i
+    ) %>% return()
+  }
+  1:nb_samples %>% 
+    lapply(floop) %>% 
+    bind_rows() %>% 
+    return()
 }
- 
+
+samples = draw_samples(nb_samples = 5, kern = kern)
+
 gg_anim = ggplot(samples) + geom_line(aes(x = Input, y = Output, col = ID)) + 
   guides(col = 'none') +
   theme_classic() + transition_states(Index)
 
 animate(gg_anim, height = 1600, width = 2000, res = 300)
 
-anim_save("illu_lin_kernel.gif")
+anim_save("illu_prior_gp.gif")
+
+## Trained GP illustration
+set.seed(7)
+db = simu_db(M = 1, N = 5)
+
+hp_gp = train_gp(db)
+samples = draw_samples(kern = kern_to_cov(input,
+                                          kern = 'SE',
+                                          hp = hp_gp %>% select(- noise)))
+
+gg_anim = ggplot(samples) + geom_line(aes(x = Input, y = Output, col = ID)) +
+  geom_point(data = db, aes(Input, Output)) + 
+  guides(col = 'none') + theme_classic() + transition_states(Index)
+
+animate(gg_anim, height = 1600, width = 2000, res = 300)
+
+anim_save("illu_trained_gp.gif")
+
+## Posterior samples GP illustration
+sub_db = db[c(1, 2, 4),]
+pred_gp = pred_gp(sub_db, grid_inputs = input, hp = hp_gp, get_full_cov = T) 
+
+samples = draw_samples(mean = pred_gp$pred$Mean, kern = pred_gp$cov)
+
+gg_anim = ggplot(samples) + geom_line(aes(x = Input, y = Output, col = ID)) +
+  geom_point(data = sub_db, aes(Input, Output)) + 
+  guides(col = 'none') + theme_classic() + transition_states(Index)
+
+animate(gg_anim, height = 1600, width = 2000, res = 300)
+
+anim_save("illu_post_gp4.gif")
+
+## Posterior GP illustration
+pred_gp = pred_gp(sub_db, grid_inputs = input, hp = hp_gp) 
+
+plot_gp = plot_gp(pred_gp, data = sub_db)
+
+ggsave("illu_post_gp3.png", plot_gp, height=1600, width=2000, dpi=300, units="px")
 
 ## Illustration 2-D GIF
 
@@ -558,9 +608,62 @@ animate(plot_gif, height = 1200, width = 2000, res = 300)
 anim_save("illu_magma_2D.gif")
 
 ## Illustration GP and Magma GIF
-set.seed(3)
+set.seed(10)
 db = simu_db(common_input = F)
-db_i = db %>% filter(ID == 1)
 #MagmaClustR:::plot_db(db)
 
-pred_gp = pred_gp(db)
+db_i = db %>% filter(ID == 6) %>% filter(Input < 4.5)
+test_db_i = db %>% filter(ID == 6) %>% filter(Input > 4.5)
+
+
+pred_gp = pred_gp(db_i, grid_inputs = seq(0, 10, 0.01))
+#mod_magma = train_magma(db)
+pred_magma = pred_magma(db_i, mod_magma, grid_inputs = seq(0, 10, 0.01), 
+                        get_hyperpost = T)
+
+illu_gp = plot_gp(pred_gp, data = db_i) +
+  geom_point(data = test_db_i, aes(Input, Output), col = 'red') + 
+  ylim(c(-37, 27))
+
+illu_magma = plot_gp(pred_magma, data = db_i, data_train = db_i, 
+        prior_mean = pred_magma$hyperpost$mean) +
+  geom_point(data = test_db_i, aes(Input, Output), col = 'red')
+
+ggsave("illu_gp.png", illu_gp, height=1200, width=2000, dpi=300, units="px")
+ggsave("illu_magma.png",illu_magma, height=1200, width=2000, dpi=300, units="px")
+
+
+pred_gp_gif = pred_gif(db %>% filter(ID == 6), grid_inputs = seq(0, 10, 0.01))
+pred_magma_gif = pred_gif(db %>% filter(ID == 6), mod_magma,
+                          grid_inputs = seq(0, 10, 0.01))
+
+## Use to put add a layer to ggplot backward
+# `-.gg` <- function(plot, layer) {
+#   if (missing(layer)) {
+#     stop("Cannot use `-.gg()` with a single argument. Did you accidentally put - on a new line?")
+#   }
+#   if (!is.ggplot(plot)) {
+#     stop('Need a plot on the left side')
+#   }
+#   plot$layers = c(layer, plot$layers)
+#   plot
+# }
+
+illu_gp_gif = plot_gif(
+  pred_gp_gif %>%filter(Index > 4) %>% mutate(Index = Index - 4),
+  data = test_db_i) -
+  geom_point(data = test_db_i, aes(Input, Output), col = 'red', size = 2) +
+  geom_point(data = db_i, aes(Input, Output), col = 'black', size = 2) 
+
+illu_magma_gif = plot_gif(
+  pred_magma_gif %>% filter(Index > 4) %>% mutate(Index = Index - 4),
+  data = test_db_i,
+  data_train = db_i,
+  prior_mean = pred_magma$hyperpost$mean) -
+  geom_point(data = test_db_i, aes(Input, Output), col = 'red', size = 2) +
+  geom_point(data = db_i, aes(Input, Output), col = 'black', size = 2) 
+
+animate(illu_gp_gif, height = 1200, width = 2000, res = 300)
+anim_save("illu_gp_gif.gif")
+animate(illu_magma_gif, height = 1200, width = 2000, res = 300)
+anim_save("illu_magma_gif.gif")
