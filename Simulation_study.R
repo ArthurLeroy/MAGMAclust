@@ -133,7 +133,7 @@ pred_MOGPTK = function(db, nb_obs, nb_test){
 }
 
 ##### CLUST: SIMULATION FUNCTIONS #####
-simu_indiv = function(ID, t, mean, kern, clust, a, b, sigma)
+simu_indiv = function(ID, t, mean, kern, clust, a, b)
 { # ID : identification of the individual
   # t : timestamps on which we observe the GP
   # kern : kernel associated to the covariance function of the GP
